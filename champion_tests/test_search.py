@@ -8,6 +8,11 @@ class GeminiSearchTests(unittest.TestCase):
         s = (ROOT / "main/conversation_task.cpp").read_text()
         self.assertIn('cfg.model = "gemini-3.8-live";', s)
 
+    def test_live_38_session_omits_legacy_thinking_config(self):
+        s = (ROOT / "components/conversation/gemini_live_client.cpp").read_text()
+        self.assertNotIn('cJSON_AddObjectToObject(gen_cfg, "thinkingConfig")', s)
+        self.assertIn('models/gemini-3.8-live', s)
+
     def test_search_preserves_local_tools(self):
         s = (ROOT / "components/conversation/gemini_live_client.cpp").read_text()
         a = s.index('cJSON_AddObjectToObject(search_tool, "googleSearch");')
