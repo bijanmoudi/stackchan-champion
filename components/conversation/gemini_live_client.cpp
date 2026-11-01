@@ -529,7 +529,7 @@ private:
 
         // Default model if caller didn't override.
         const std::string model = config_.model.empty()
-            ? std::string{"models/gemini-2.0-flash-live-001"}
+            ? std::string{"models/gemini-3.8-live"}
             : (config_.model.starts_with("models/") ? config_.model
                                                     : std::string{"models/"} + config_.model);
         cJSON_AddStringToObject(setup, "model", model.c_str());
@@ -537,16 +537,8 @@ private:
         cJSON* gen_cfg = cJSON_AddObjectToObject(setup, "generationConfig");
         cJSON* mods = cJSON_AddArrayToObject(gen_cfg, "responseModalities");
         cJSON_AddItemToArray(mods, cJSON_CreateString("AUDIO"));
-        // The 2.5 native-audio models "think" before answering by default.
-        // On the device that showed up as 15-30 s of silence after the user
-        // stopped talking, thought-summary text parts in modelTurn, and the
-        // model voicing "tool_code get_time()" instead of issuing a real
-        // functionCall. A zero budget turns thinking off; a model that
-        // doesn't support the field ignores it.
-        {
-            cJSON* think = cJSON_AddObjectToObject(gen_cfg, "thinkingConfig");
-            cJSON_AddNumberToObject(think, "thinkingBudget", 0);
-        }
+        // Gemini 3.8 Live rejects legacy thinkingConfig in session setup.
+        // Use its default low-latency real-time behavior.
         // Server VAD tuning: end the user's turn quickly after they stop
         // (a tabletop robot is a short-utterance, back-and-forth setting).
         {
