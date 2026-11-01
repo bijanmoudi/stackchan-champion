@@ -578,8 +578,13 @@ private:
             cJSON_AddObjectToObject(setup, "outputAudioTranscription");
         }
 
+        // Server-managed search and existing device-side function tools.
+        cJSON* tools = cJSON_AddArrayToObject(setup, "tools");
+        cJSON* search_tool = cJSON_CreateObject();
+        cJSON_AddObjectToObject(search_tool, "googleSearch");
+        cJSON_AddItemToArray(tools, search_tool);
+
         if (!config_.tools.empty()) {
-            cJSON* tools = cJSON_AddArrayToObject(setup, "tools");
             cJSON* tool = cJSON_CreateObject();
             cJSON* decls = cJSON_AddArrayToObject(tool, "functionDeclarations");
             for (const auto& t : config_.tools) {

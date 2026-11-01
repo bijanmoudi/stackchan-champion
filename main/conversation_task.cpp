@@ -392,7 +392,7 @@ private:
             // "models/..."; the client prepends that for us when missing.
             // gemini-2.0-flash-live-001 was deprecated; the native-audio
             // preview is what's actually live on the Developer API right now.
-            cfg.model = "gemini-2.5-flash-native-audio-preview-12-2025";
+            cfg.model = "gemini-3.8-live";
             cfg.voice = "Aoede"; // pre-built voice name; OK to leave empty
         } else {
             cfg.model = CONFIG_STACKCHAN_OPENAI_REALTIME_MODEL;
