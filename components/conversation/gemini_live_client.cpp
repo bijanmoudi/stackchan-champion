@@ -421,8 +421,17 @@ private:
                 ESP_LOGW(kTag, "WEBSOCKET_EVENT_CLOSED phase=%s (no close frame seen)",
                          setup_sent_ ? "post-setup" : "pre-setup");
             }
+            // A quota rejection is not a transient transport failure.
+            // Send a distinct marker so the coordinator can halt instead of
+            // reconnecting indefinitely and generating more 429 requests.
+            const bool quota_rejected =
+                last_close_reason_.find("exceeded your current quota") != std::string::npos ||
+                last_close_reason_.find("RESOURCE_EXHAUSTED") != std::string::npos ||
+                last_close_reason_.find("TooManyRequests") != std::string::npos ||
+                last_close_reason_.find("429") != std::string::npos;
             set_state(ConversationState::Error);
-            emit_error(ConversationError::NotConnected, "websocket closed");
+            emit_error(ConversationError::NotConnected,
+                       quota_rejected ? "gemini_quota_exceeded" : "websocket closed");
             // Reset for the next session — the new client (re-init in
             // conv-task) will see fresh frames.
             last_close_code_ = 0;
