@@ -25,6 +25,17 @@ class GeminiSearchTests(unittest.TestCase):
         self.assertIn('client_->stop();', task)
         self.assertIn('state_.conv.status.store(ConvStatus::Error', task)
 
+    def test_offline_play_ui_and_cloud_pause(self):
+        ui = (ROOT / "main/device_ui.cpp").read_text()
+        shared = (ROOT / "main/shared_state.hpp").read_text()
+        task = (ROOT / "main/conversation_task.cpp").read_text()
+        self.assertIn('kPlay = 7', ui)
+        self.assertIn('g_cv->drawString("PEEKABOO!"', ui)
+        self.assertIn('g_cv->drawString(g_play_color >= 0', ui)
+        self.assertIn('std::atomic<bool> play_mode_active{false}', shared)
+        self.assertIn('g_state->play_mode_active.store(page == kPlay', ui)
+        self.assertIn('state_.play_mode_active.load(std::memory_order_acquire)', task)
+
     def test_search_preserves_local_tools(self):
         s = (ROOT / "components/conversation/gemini_live_client.cpp").read_text()
         a = s.index('cJSON_AddObjectToObject(search_tool, "googleSearch");')
