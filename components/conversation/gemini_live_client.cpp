@@ -406,7 +406,7 @@ private:
             set_state(ConversationState::Error);
             emit_error(ConversationError::TransportInit, "websocket error");
             break;
-        case WEBSOCKET_EVENT_CLOSED:
+        case WEBSOCKET_EVENT_CLOSED: {
             // Either a setup-time rejection (Gemini silently closes the WS on
             // unknown model / unsupported field — no DISCONNECTED, just
             // CLOSED) or a mid-turn server close (code 1011 etc). Surface the
@@ -421,13 +421,23 @@ private:
                 ESP_LOGW(kTag, "WEBSOCKET_EVENT_CLOSED phase=%s (no close frame seen)",
                          setup_sent_ ? "post-setup" : "pre-setup");
             }
+            // A quota rejection is not a transient transport failure.
+            // Send a distinct marker so the coordinator can halt instead of
+            // reconnecting indefinitely and generating more 429 requests.
+            const bool quota_rejected =
+                last_close_reason_.find("exceeded your current quota") != std::string::npos ||
+                last_close_reason_.find("RESOURCE_EXHAUSTED") != std::string::npos ||
+                last_close_reason_.find("TooManyRequests") != std::string::npos ||
+                last_close_reason_.find("429") != std::string::npos;
             set_state(ConversationState::Error);
-            emit_error(ConversationError::NotConnected, "websocket closed");
+            emit_error(ConversationError::NotConnected,
+                       quota_rejected ? "gemini_quota_exceeded" : "websocket closed");
             // Reset for the next session — the new client (re-init in
             // conv-task) will see fresh frames.
             last_close_code_ = 0;
             last_close_reason_.clear();
             break;
+        }
         default:
             break;
         }
@@ -529,7 +539,7 @@ private:
 
         // Default model if caller didn't override.
         const std::string model = config_.model.empty()
-            ? std::string{"models/gemini-2.0-flash-live-001"}
+            ? std::string{"models/gemini-3.8-live"}
             : (config_.model.starts_with("models/") ? config_.model
                                                     : std::string{"models/"} + config_.model);
         cJSON_AddStringToObject(setup, "model", model.c_str());
@@ -537,16 +547,8 @@ private:
         cJSON* gen_cfg = cJSON_AddObjectToObject(setup, "generationConfig");
         cJSON* mods = cJSON_AddArrayToObject(gen_cfg, "responseModalities");
         cJSON_AddItemToArray(mods, cJSON_CreateString("AUDIO"));
-        // The 2.5 native-audio models "think" before answering by default.
-        // On the device that showed up as 15-30 s of silence after the user
-        // stopped talking, thought-summary text parts in modelTurn, and the
-        // model voicing "tool_code get_time()" instead of issuing a real
-        // functionCall. A zero budget turns thinking off; a model that
-        // doesn't support the field ignores it.
-        {
-            cJSON* think = cJSON_AddObjectToObject(gen_cfg, "thinkingConfig");
-            cJSON_AddNumberToObject(think, "thinkingBudget", 0);
-        }
+        // Gemini 3.8 Live rejects legacy thinkingConfig in session setup.
+        // Use its default low-latency real-time behavior.
         // Server VAD tuning: end the user's turn quickly after they stop
         // (a tabletop robot is a short-utterance, back-and-forth setting).
         {
@@ -578,8 +580,13 @@ private:
             cJSON_AddObjectToObject(setup, "outputAudioTranscription");
         }
 
+        // Server-managed search and existing device-side function tools.
+        cJSON* tools = cJSON_AddArrayToObject(setup, "tools");
+        cJSON* search_tool = cJSON_CreateObject();
+        cJSON_AddObjectToObject(search_tool, "googleSearch");
+        cJSON_AddItemToArray(tools, search_tool);
+
         if (!config_.tools.empty()) {
-            cJSON* tools = cJSON_AddArrayToObject(setup, "tools");
             cJSON* tool = cJSON_CreateObject();
             cJSON* decls = cJSON_AddArrayToObject(tool, "functionDeclarations");
             for (const auto& t : config_.tools) {

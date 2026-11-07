@@ -1,0 +1,76 @@
+name: Champion CoreS3 (Gemini Live + Google Search)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feature/gemini-google-search
+    paths:
+      - 'main/conversation_task.cpp'
+      - 'components/conversation/gemini_live_client.cpp'
+      - '.github/workflows/champion-cores3.yml'
+      - 'champion_tests/**'
+      - 'docs/CHAMPION.md'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container:
+      image: espressif/idf:v5.5.5
+    timeout-minutes: 100
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Node for avatar compiler
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends nodejs
+          node --version
+
+      - name: Check source invariants
+        shell: bash
+        run: python3 -m unittest discover -s champion_tests -v
+
+      - name: Patch vendor library
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/components/M5Unified"
+          bash tools/apply-m5-patches.sh
+
+      - name: Build main and recovery for CoreS3
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          echo "champion-${GITHUB_SHA:0:7}" > version.txt
+          cp version.txt recovery/version.txt
+          make set-target BOARD=cores3
+          make build BOARD=cores3
+          make -C recovery set-target BOARD=cores3 IDF_PATH="$IDF_PATH"
+          make -C recovery build BOARD=cores3 IDF_PATH="$IDF_PATH"
+
+      - name: Package correct ADR-001 flash layout
+        shell: bash
+        run: |
+          python3 script/pack_release.py --board cores3 --version "champion-${GITHUB_SHA:0:7}" --out release/cores3
+          test -s release/cores3/flash_args
+          test -s release/cores3/flash_manifest.json
+          test -s release/cores3/recovery.bin
+          test -s release/cores3/bootctl.bin
+          cp docs/CHAMPION.md release/cores3/README_CHAMPION.md
+
+      - name: Upload flashable firmware package
+        uses: actions/upload-artifact@v4
+        with:
+          name: champion-cores3-firmware
+          path: release/cores3/
+          if-no-files-found: error
+          retention-days: 30

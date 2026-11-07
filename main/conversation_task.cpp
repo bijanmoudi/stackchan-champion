@@ -332,6 +332,21 @@ public:
                 // and the existing handler progresses us to Listening.
             }
             drain_events();
+            if (quota_limited_) {
+                // Do not reconnect after Google's quota rejection (HTTP 429
+                // surfaced as a WebSocket close with reason text). Leave the
+                // robot's UI and offline functions running; a device reboot
+                // is required before trying the cloud connection again.
+                ESP_LOGE(kTag, "Gemini quota exhausted — stopping conversation auto-retry until reboot");
+                client_->stop();
+                flush_events();
+                M5.Mic.end();
+                state_.conv.active.store(false, std::memory_order_relaxed);
+                state_.conv.idle.store(false, std::memory_order_relaxed);
+                state_.conv.status.store(ConvStatus::Error, std::memory_order_relaxed);
+                vTaskDelete(nullptr);
+                return;
+            }
             service_state();
         }
     }
@@ -354,6 +369,7 @@ private:
         while (xQueueReceive(event_queue_, &ev, 0) == pdTRUE) {
             handle_event(*ev);
             delete ev;
+            if (quota_limited_) break;  // discard stale close events without reconnecting
         }
     }
 
@@ -392,7 +408,7 @@ private:
             // "models/..."; the client prepends that for us when missing.
             // gemini-2.0-flash-live-001 was deprecated; the native-audio
             // preview is what's actually live on the Developer API right now.
-            cfg.model = "gemini-2.5-flash-native-audio-preview-12-2025";
+            cfg.model = "gemini-3.8-live";
             cfg.voice = "Aoede"; // pre-built voice name; OK to leave empty
         } else {
             cfg.model = CONFIG_STACKCHAN_OPENAI_REALTIME_MODEL;
@@ -1143,6 +1159,13 @@ private:
             break;
 
         case conv::ConversationEventType::Error: {
+            if (provider_ == config::Provider::Gemini &&
+                ev.text == "gemini_quota_exceeded") {
+                quota_limited_ = true;
+                state_.set_balloon_text("Gemini quota exceeded", /*hold_ms=*/0);
+                ESP_LOGE(kTag, "Gemini quota exceeded — disable automatic reconnect");
+                break;
+            }
             // Transport errors (disconnect / handshake) are fatal — the
             // session is gone and must be rebuilt. Server-side errors (bad
             // request, a no-op cancellation, rate-limit notices, …) leave the
@@ -1422,6 +1445,7 @@ private:
     // outages don't drag the wait time past 1 min — Gemini's preview-endpoint
     // 1011 storms typically last 10-30 s, so 60 s of grace is plenty.
     unsigned consecutive_recover_failures_{0};
+    bool quota_limited_{false};  // HALT on Gemini 429 until the user reboots
 
     // --- audio-pipeline diagnostics ----------------------------------------
     // A chunk's identity is "the last sample offset in assistant_pcm_ at the
