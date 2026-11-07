@@ -6,8 +6,11 @@ on:
     branches:
       - main
       - feature/gemini-google-search
+      - feature/offline-play-mvp
     paths:
       - 'main/conversation_task.cpp'
+      - 'main/device_ui.cpp'
+      - 'main/shared_state.hpp'
       - 'components/conversation/gemini_live_client.cpp'
       - '.github/workflows/champion-cores3.yml'
       - 'champion_tests/**'

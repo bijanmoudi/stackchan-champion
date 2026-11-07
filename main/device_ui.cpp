@@ -51,9 +51,10 @@ enum Page : int {
     kRange = 4,
     kConversation = 5,
     kLtTimer = 6,
+    kPlay = 7,
     kTabCount
 };
-const char* const kTabLabels[kTabCount] = {"情報", "設定1", "設定2", "操作", "範囲", "会話", "LT"};
+const char* const kTabLabels[kTabCount] = {"情報", "設定1", "設定2", "操作", "範囲", "会話", "LT", "PLAY"};
 int num_tab_pages() { return (kTabCount + kTabsPerPage - 1) / kTabsPerPage; }
 
 const auto* const kFontTitle = &fonts::lgfxJapanGothic_24;
@@ -66,6 +67,13 @@ std::atomic<int> g_page{kInfo};
 std::atomic<int> g_tab_page{0}; // which group of tabs is visible (paging)
 std::atomic<bool> g_dirty{true};
 int g_provider = 0; // 0 = OpenAI, 1 = Gemini, 2 = XiaoZhi (cached at init)
+
+// MVP offline toddler games. Only the on-device render + touch path is used.
+// No model, Wi-Fi, microphone or cloud API calls are made by either game.
+enum class PlayScreen : std::uint8_t { Menu, Colors, Peekaboo };
+PlayScreen g_play_screen = PlayScreen::Menu;
+int g_play_color = -1; // -1 until the child picks a color
+bool g_peekaboo_visible = false;
 
 // Staged settings (loaded from NVS on open; applied on 適用).
 // g_stage_conv mirrors the legacy openai_enabled flag for backwards
@@ -719,6 +727,72 @@ void draw_lt_timer()
     g_cv->drawString(active ? "ストップ" : "スタート", kW / 2, kLtStartY + kLtStartH / 2);
 }
 
+// Champion offline play: oversized touch targets for toddler exploration.
+void draw_play()
+{
+    const std::uint16_t white = g_cv->color565(245, 245, 245);
+    const std::uint16_t light = g_cv->color565(140, 180, 245);
+    g_cv->setTextDatum(lgfx::textdatum_t::middle_center);
+    if (g_play_screen == PlayScreen::Menu) {
+        g_cv->setFont(kFontTitle);
+        g_cv->setTextColor(white);
+        g_cv->drawString("PLAY MODE", kW / 2, 66);
+        g_cv->fillRoundRect(18, 95, 284, 55, 10, g_cv->color565(35, 100, 190));
+        g_cv->fillRoundRect(18, 160, 284, 55, 10, g_cv->color565(160, 65, 145));
+        g_cv->setFont(kFontTitle);
+        g_cv->drawString("COLORS", kW / 2, 122);
+        g_cv->drawString("PEEKABOO", kW / 2, 187);
+        return;
+    }
+
+    // The Back control is in the content region; the normal top bar still
+    // handles leaving PLAY entirely.
+    g_cv->fillRoundRect(242, 43, 66, 31, 5, g_cv->color565(60, 65, 80));
+    g_cv->setFont(kFontBody);
+    g_cv->setTextColor(white);
+    g_cv->drawString("BACK", 275, 58);
+
+    if (g_play_screen == PlayScreen::Colors) {
+        constexpr const char* names[3] = {"RED", "BLUE", "YELLOW"};
+        const std::uint16_t colors[3] = {
+            g_cv->color565(240, 55, 65),
+            g_cv->color565(45, 125, 245),
+            g_cv->color565(250, 215, 40),
+        };
+        for (int i = 0; i < 3; ++i) {
+            const int x = 10 + i * 103;
+            g_cv->fillRoundRect(x, 85, 94, 105, 10, colors[i]);
+            if (g_play_color == i) {
+                g_cv->drawRoundRect(x - 2, 83, 98, 109, 11, white);
+            }
+            g_cv->setFont(kFontBody);
+            g_cv->setTextColor(i == 2 ? g_cv->color565(25, 25, 25) : white);
+            g_cv->drawString(names[i], x + 47, 138);
+        }
+        g_cv->setFont(kFontTitle);
+        g_cv->setTextColor(g_play_color >= 0 ? colors[g_play_color] : light);
+        g_cv->drawString(g_play_color >= 0 ? names[g_play_color] : "TAP A COLOR", kW / 2, 218);
+        return;
+    }
+
+    g_cv->setFont(kFontTitle);
+    if (g_peekaboo_visible) {
+        g_cv->fillCircle(111, 132, 37, white);
+        g_cv->fillCircle(209, 132, 37, white);
+        g_cv->fillCircle(118, 135, 15, g_cv->color565(35, 40, 60));
+        g_cv->fillCircle(216, 135, 15, g_cv->color565(35, 40, 60));
+        g_cv->setTextColor(g_cv->color565(250, 185, 80));
+        g_cv->drawString("PEEKABOO!", kW / 2, 214);
+    } else {
+        g_cv->fillRoundRect(70, 99, 180, 83, 18, g_cv->color565(50, 68, 110));
+        g_cv->setTextColor(white);
+        g_cv->drawString("WHERE AM I?", kW / 2, 140);
+        g_cv->setFont(kFontBody);
+        g_cv->setTextColor(light);
+        g_cv->drawString("TAP TO REVEAL", kW / 2, 210);
+    }
+}
+
 void render_page()
 {
     const int page = g_page.load(std::memory_order_relaxed);
@@ -736,6 +810,8 @@ void render_page()
         draw_range();
     } else if (page == kLtTimer) {
         draw_lt_timer();
+    } else if (page == kPlay) {
+        draw_play();
     } else {
         draw_conversation();
     }
@@ -809,6 +885,10 @@ void save_range_and_reboot()
 void update_range_mode_for_page(int page)
 {
     g_state->servo.range_mode.store(page == kRange, std::memory_order_relaxed);
+    // Taking the toddler PLAY tab pauses any live cloud conversation.
+    // Leaving it resumes the existing conversation task automatically.
+    g_state->play_mode_active.store(page == kPlay, std::memory_order_release);
+    if (page != kPlay) g_play_screen = PlayScreen::Menu;
 }
 
 } // namespace
@@ -932,6 +1012,31 @@ bool handle_tap(int x, int y)
 
     // Content, per page.
     const int page = g_page.load(std::memory_order_relaxed);
+    if (page == kPlay) {
+        if (g_play_screen != PlayScreen::Menu &&
+            in_rect(x, y, 242, 43, 66, 31)) {
+            g_play_screen = PlayScreen::Menu;
+        } else if (g_play_screen == PlayScreen::Menu) {
+            if (in_rect(x, y, 18, 95, 284, 55)) {
+                g_play_screen = PlayScreen::Colors;
+                g_play_color = -1;
+            } else if (in_rect(x, y, 18, 160, 284, 55)) {
+                g_play_screen = PlayScreen::Peekaboo;
+                g_peekaboo_visible = false;
+            }
+        } else if (g_play_screen == PlayScreen::Colors) {
+            for (int i = 0; i < 3; ++i) {
+                if (in_rect(x, y, 10 + i * 103, 85, 94, 105)) {
+                    g_play_color = i;
+                    break;
+                }
+            }
+        } else if (g_play_screen == PlayScreen::Peekaboo) {
+            g_peekaboo_visible = !g_peekaboo_visible;
+        }
+        g_dirty.store(true, std::memory_order_relaxed);
+        return true;
+    }
     // kSettings packs 5 rows tighter than kRowH so the apply button + caption
     // fit; keep the default kRowH for kControl and the other pages.
     const int row_h = (page == kSettings || page == kSettings2) ? kSettingsRowH : kRowH;
