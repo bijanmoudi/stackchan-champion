@@ -193,6 +193,11 @@ public:
     // up the mic at boot wait for this.
     std::atomic<bool> boot_sounds_done{false};
 
+    // On-device offline games request suspension of cloud streaming. The
+    // conversation coordinator yields the mic + WebSocket and resumes on
+    // exit. Local UI touch games never send text or audio to an API.
+    std::atomic<bool> play_mode_active{false};
+
     // --- Battery (demo_loop samples the INA226; UI + services read) --------
     struct Battery {
         // Snapshot refreshed periodically by demo_loop (the only task that
