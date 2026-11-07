@@ -406,7 +406,7 @@ private:
             set_state(ConversationState::Error);
             emit_error(ConversationError::TransportInit, "websocket error");
             break;
-        case WEBSOCKET_EVENT_CLOSED:
+        case WEBSOCKET_EVENT_CLOSED: {
             // Either a setup-time rejection (Gemini silently closes the WS on
             // unknown model / unsupported field — no DISCONNECTED, just
             // CLOSED) or a mid-turn server close (code 1011 etc). Surface the
@@ -437,6 +437,7 @@ private:
             last_close_code_ = 0;
             last_close_reason_.clear();
             break;
+        }
         default:
             break;
         }
