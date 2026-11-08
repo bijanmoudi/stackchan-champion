@@ -12,6 +12,7 @@
 #include <esp_mac.h>
 #include <esp_netif.h>
 #include <esp_system.h>
+#include <esp_random.h>
 #include <esp_timer.h>
 
 #include <config_service/config_service.hpp>
