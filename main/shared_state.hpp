@@ -197,6 +197,19 @@ public:
     // conversation coordinator yields the mic + WebSocket and resumes on
     // exit. Local UI touch games never send text or audio to an API.
     std::atomic<bool> play_mode_active{false};
+    // React-to-touch game state. This is published by the on-device UI and
+    // consumed by the local demo task; no Gemini traffic is involved.
+    struct Play {
+        std::atomic<std::uint8_t> screen{0};  // 0 menu, 1 colors, 2 peekaboo
+        std::atomic<std::int8_t> selected_color{-1};
+        std::atomic<bool> peek_visible{false};
+        std::atomic<int> sound_id{-1};       // 0 dali, 1 red, 2 blue, 3 yellow, 4 bravo, 5 try
+        std::atomic<std::uint32_t> sound_sequence{0};
+    } play;
+    // I2S ownership handshake: no local speech until the standalone
+    // MicLipSync task has relinquished the mic.
+    std::atomic<bool> mic_lip_task_running{false};
+    std::atomic<bool> mic_lip_yielded{false};
 
     // --- Battery (demo_loop samples the INA226; UI + services read) --------
     struct Battery {
