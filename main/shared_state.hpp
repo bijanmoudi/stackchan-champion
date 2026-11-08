@@ -177,6 +177,7 @@ public:
         // (recover_after_error). The 会話 screen shows both so a reconnect
         // storm (repeated API connection failures) is visible.
         std::atomic<ConvStatus> status{ConvStatus::Disabled};
+        std::atomic<bool> quota_exceeded{false}; // Gemini HTTP 429: surfaced separately from Wi-Fi failures
         std::atomic<std::uint32_t> reconnects{0};
         // Cooperative I2S handoff flag — see audio_stream_active below.
         std::atomic<bool> yielded_i2s{false};

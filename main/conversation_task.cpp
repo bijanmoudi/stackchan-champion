@@ -1166,6 +1166,7 @@ private:
             if (provider_ == config::Provider::Gemini &&
                 ev.text == "gemini_quota_exceeded") {
                 quota_limited_ = true;
+                state_.conv.quota_exceeded.store(true, std::memory_order_release);
                 state_.set_balloon_text("Gemini quota exceeded", /*hold_ms=*/0);
                 ESP_LOGE(kTag, "Gemini quota exceeded — disable automatic reconnect");
                 break;

@@ -215,7 +215,7 @@ constexpr const char* kTag = "stackchan";
     };
     auto play_local_clip = [&](int clip_id) {
         if (clip_id < 0 || clip_id >= static_cast<int>(sizeof(play_audio::kClips) /
-                                                       sizeof(play_audio::kClips[0]))) return;
+                                                       sizeof(play_audio::kClips[0]))) return false;
         const auto& clip = play_audio::kClips[clip_id];
         // Assets are 16 kHz mu-law, not 8 kHz duplicated into 16 kHz.
         // Higher source bandwidth improves intelligibility of Persian clips.
@@ -224,7 +224,22 @@ constexpr const char* kTag = "stackchan";
             play_pcm[i] = ulaw_decode(clip.data[i]);
         ESP_LOGI("play-audio", "local Persian clip %d: %u samples at 16 kHz",
                  clip_id, static_cast<unsigned>(play_pcm.size()));
-        M5.Speaker.playRaw(play_pcm.data(), play_pcm.size(), 16000, false);
+        // The I2S peripheral is shared with the mic. A previous mic
+        // session may have ended the speaker, so start it explicitly.
+        if (!M5.Speaker.begin()) {
+            ESP_LOGE("play-audio", "speaker begin failed (clip=%d)", clip_id);
+            return false;
+        }
+        const bool ok = M5.Speaker.playRaw(play_pcm.data(), play_pcm.size(),
+                                            16000, false);
+        ESP_LOGI("play-audio", "clip=%d bytes=%u playRaw=%s volume=%u%%",
+                 clip_id, static_cast<unsigned>(clip.size), ok ? "OK" : "FAILED",
+                 static_cast<unsigned>(g_state->speaker.volume_pct.load(
+                     std::memory_order_relaxed)));
+        if (!ok) {
+            ESP_LOGE("play-audio", "playRaw failed: mic/speaker handoff or I2S route");
+        }
+        return ok;
     };
 
     for (;;) {
@@ -512,8 +527,13 @@ constexpr const char* kTag = "stackchan";
             if (play_pending_sound >= 0 && cloud_released && mic_released &&
                 !M5.Speaker.isPlaying() &&
                 static_cast<std::int32_t>(now_ms - play_speak_due_ms) >= 0) {
-                play_local_clip(play_pending_sound);
-                play_pending_sound = -1;
+                if (play_local_clip(play_pending_sound)) {
+                    play_pending_sound = -1;
+                } else {
+                    // Retain pending phrase; don't silently lose the prompt.
+                    // Back off rather than repeatedly resetting I2S.
+                    play_speak_due_ms = now_ms + 700;
+                }
             }
 
             vTaskDelay(pdMS_TO_TICKS(40));

@@ -97,7 +97,7 @@ void draw_mute_badge(RichCanvas& canvas, int x, int y)
 // Disabled). Makes the turn visible: 待受 → 聞き取り中 → 応答待ち → (ツール) →
 // 応答中, plus connection states, so a silent device is explainable at a glance.
 // `right`/`top` are the corner insets (round panels pass a larger inset).
-void draw_conv_status(RichCanvas& canvas, ConvStatus st, int canvas_w, int right, int top)
+void draw_conv_status(RichCanvas& canvas, ConvStatus st, bool quota_exceeded, int canvas_w, int right, int top)
 {
     const char* text = nullptr;
     std::uint16_t dot = canvas.color565(150, 150, 150);
@@ -117,7 +117,7 @@ void draw_conv_status(RichCanvas& canvas, ConvStatus st, int canvas_w, int right
     case ConvStatus::Talking: text = stackchan::ui_text::get("common.responding"); dot = live; break;
     case ConvStatus::Yielded: text = stackchan::ui_text::get("common.playback"); dot = canvas.color565(150, 150, 150); break;
     case ConvStatus::Reconnecting: text = stackchan::ui_text::get("common.reconnecting"); dot = busy; break;
-    case ConvStatus::Error: text = stackchan::ui_text::get("common.error"); dot = err; break;
+    case ConvStatus::Error: text = stackchan::ui_text::get(quota_exceeded ? "common.quota_error" : "common.error"); dot = err; break;
     }
     if (text == nullptr) return;
 
@@ -318,7 +318,7 @@ void render_task_entry(void* arg)
                 const int inset = args.circular_display
                     ? static_cast<int>(canvas_w * (1.0f - 0.70710678f) * 0.5f) + 4
                     : 6;
-                draw_conv_status(canvas, cs, static_cast<int>(canvas_w), inset, inset);
+                draw_conv_status(canvas, cs, state->conv.quota_exceeded.load(std::memory_order_relaxed), static_cast<int>(canvas_w), inset, inset);
             }
         }
 

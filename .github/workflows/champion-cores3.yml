@@ -8,6 +8,7 @@ on:
       - feature/gemini-google-search
       - feature/offline-play-mvp
       - feature/play-v2-camera-i18n
+      - feature/play-v3-hardware-fixes
     paths:
       - 'main/conversation_task.cpp'
       - 'main/device_ui.cpp'
@@ -67,7 +68,8 @@ jobs:
           echo 'e390c0e74ba71fd97c49ba662ee0c6e1724b462ba2d4561698af4f564840f126  /tmp/persian-voice/fa_IR-mana-medium.onnx' | sha256sum -c -
           /tmp/piper-python/bin/python tools/generate_play_audio.py --engine piper \
             --model /tmp/persian-voice/fa_IR-mana-medium.onnx \
-            --output main/play_audio_assets.hpp
+            --output main/play_audio_assets.hpp \
+            --preview-dir build_audio_preview
           test -s main/play_audio_assets.hpp
 
       - name: Patch vendor library
@@ -97,6 +99,10 @@ jobs:
           test -s release/cores3/recovery.bin
           test -s release/cores3/bootctl.bin
           cp docs/CHAMPION.md release/cores3/README_CHAMPION.md
+          mkdir -p release/cores3/audio_preview
+          cp build_audio_preview/*.wav release/cores3/audio_preview/
+          test -s release/cores3/audio_preview/dali.wav
+          test -s release/cores3/audio_preview/red.wav
 
       - name: Upload flashable firmware package
         uses: actions/upload-artifact@v4
