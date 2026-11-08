@@ -73,7 +73,13 @@ int g_provider = 0; // 0 = OpenAI, 1 = Gemini, 2 = XiaoZhi (cached at init)
 enum class PlayScreen : std::uint8_t { Menu, Colors, Peekaboo };
 PlayScreen g_play_screen = PlayScreen::Menu;
 int g_play_color = -1; // -1 until the child picks a color
-bool g_peekaboo_visible = false;
+bool g_play_quiz = false;
+int g_play_target = 0;
+void queue_play_audio(int id)
+{
+    g_state->play.sound_id.store(id, std::memory_order_relaxed);
+    g_state->play.sound_sequence.fetch_add(1, std::memory_order_release);
+}
 
 // Staged settings (loaded from NVS on open; applied on 適用).
 // g_stage_conv mirrors the legacy openai_enabled flag for backwards
@@ -727,11 +733,12 @@ void draw_lt_timer()
     g_cv->drawString(active ? "ストップ" : "スタート", kW / 2, kLtStartY + kLtStartH / 2);
 }
 
-// Champion offline play: oversized touch targets for toddler exploration.
+// StackChan Champion: autonomous, touch-friendly offline toddler games.
+// Eye animation is screen-based: the K151 has no physical arms or eyelids.
 void draw_play()
 {
-    const std::uint16_t white = g_cv->color565(245, 245, 245);
-    const std::uint16_t light = g_cv->color565(140, 180, 245);
+    const auto white = g_cv->color565(245, 245, 245);
+    const auto light = g_cv->color565(140, 180, 245);
     g_cv->setTextDatum(lgfx::textdatum_t::middle_center);
     if (g_play_screen == PlayScreen::Menu) {
         g_cv->setFont(kFontTitle);
@@ -739,57 +746,64 @@ void draw_play()
         g_cv->drawString("PLAY MODE", kW / 2, 66);
         g_cv->fillRoundRect(18, 95, 284, 55, 10, g_cv->color565(35, 100, 190));
         g_cv->fillRoundRect(18, 160, 284, 55, 10, g_cv->color565(160, 65, 145));
-        g_cv->setFont(kFontTitle);
         g_cv->drawString("COLORS", kW / 2, 122);
         g_cv->drawString("PEEKABOO", kW / 2, 187);
         return;
     }
 
-    // The Back control is in the content region; the normal top bar still
-    // handles leaving PLAY entirely.
     g_cv->fillRoundRect(242, 43, 66, 31, 5, g_cv->color565(60, 65, 80));
     g_cv->setFont(kFontBody);
     g_cv->setTextColor(white);
     g_cv->drawString("BACK", 275, 58);
 
     if (g_play_screen == PlayScreen::Colors) {
-        constexpr const char* names[3] = {"RED", "BLUE", "YELLOW"};
-        const std::uint16_t colors[3] = {
+        constexpr const char* names[] = {"RED", "BLUE", "YELLOW"};
+        const std::uint16_t colors[] = {
             g_cv->color565(240, 55, 65),
             g_cv->color565(45, 125, 245),
             g_cv->color565(250, 215, 40),
         };
+        g_cv->fillRoundRect(12, 43, 106, 31, 5, g_cv->color565(75, 86, 115));
+        g_cv->setTextColor(white);
+        g_cv->drawString(g_play_quiz ? "TEACH" : "FIND GAME", 65, 58);
+
         for (int i = 0; i < 3; ++i) {
             const int x = 10 + i * 103;
-            g_cv->fillRoundRect(x, 85, 94, 105, 10, colors[i]);
+            g_cv->fillRoundRect(x, 89, 94, 106, 10, colors[i]);
             if (g_play_color == i) {
-                g_cv->drawRoundRect(x - 2, 83, 98, 109, 11, white);
+                g_cv->drawRoundRect(x - 2, 87, 98, 110, 11, white);
             }
-            g_cv->setFont(kFontBody);
             g_cv->setTextColor(i == 2 ? g_cv->color565(25, 25, 25) : white);
-            g_cv->drawString(names[i], x + 47, 138);
+            g_cv->drawString(names[i], x + 47, 142);
         }
         g_cv->setFont(kFontTitle);
-        g_cv->setTextColor(g_play_color >= 0 ? colors[g_play_color] : light);
-        g_cv->drawString(g_play_color >= 0 ? names[g_play_color] : "TAP A COLOR", kW / 2, 218);
+        g_cv->setTextColor(g_play_quiz ? colors[g_play_target] :
+                           (g_play_color >= 0 ? colors[g_play_color] : light));
+        const char* message = g_play_quiz ? names[g_play_target] :
+                              (g_play_color >= 0 ? names[g_play_color] : "TAP A COLOR");
+        g_cv->drawString(message, kW / 2, 222);
         return;
     }
 
-    g_cv->setFont(kFontTitle);
-    if (g_peekaboo_visible) {
-        g_cv->fillCircle(111, 132, 37, white);
-        g_cv->fillCircle(209, 132, 37, white);
-        g_cv->fillCircle(118, 135, 15, g_cv->color565(35, 40, 60));
-        g_cv->fillCircle(216, 135, 15, g_cv->color565(35, 40, 60));
+    // Peekaboo runs its own hide/reveal rhythm. Touching the screen is
+    // optional; the servo and local Persian "Dali!" sound fire automatically.
+    const bool visible = g_state->play.peek_visible.load(std::memory_order_relaxed);
+    if (visible) {
+        g_cv->fillCircle(113, 127, 37, white);
+        g_cv->fillCircle(207, 127, 37, white);
+        g_cv->fillCircle(118, 132, 16, g_cv->color565(35, 40, 60));
+        g_cv->fillCircle(212, 132, 16, g_cv->color565(35, 40, 60));
         g_cv->setTextColor(g_cv->color565(250, 185, 80));
-        g_cv->drawString("PEEKABOO!", kW / 2, 214);
+        g_cv->setFont(kFontTitle);
+        g_cv->drawString("DALI!", kW / 2, 210);
     } else {
-        g_cv->fillRoundRect(70, 99, 180, 83, 18, g_cv->color565(50, 68, 110));
-        g_cv->setTextColor(white);
-        g_cv->drawString("WHERE AM I?", kW / 2, 140);
-        g_cv->setFont(kFontBody);
+        // Cartoon hands covering the eyes (visual only, no physical arms).
+        g_cv->fillRoundRect(50, 92, 220, 94, 24, g_cv->color565(230, 168, 110));
+        g_cv->fillRoundRect(61, 105, 95, 70, 14, g_cv->color565(247, 198, 139));
+        g_cv->fillRoundRect(164, 105, 95, 70, 14, g_cv->color565(247, 198, 139));
         g_cv->setTextColor(light);
-        g_cv->drawString("TAP TO REVEAL", kW / 2, 210);
+        g_cv->setFont(kFontTitle);
+        g_cv->drawString("WHERE AM I?", kW / 2, 214);
     }
 }
 
@@ -888,7 +902,11 @@ void update_range_mode_for_page(int page)
     // Taking the toddler PLAY tab pauses any live cloud conversation.
     // Leaving it resumes the existing conversation task automatically.
     g_state->play_mode_active.store(page == kPlay, std::memory_order_release);
-    if (page != kPlay) g_play_screen = PlayScreen::Menu;
+    if (page != kPlay) {
+        g_play_screen = PlayScreen::Menu;
+        g_state->play.screen.store(0, std::memory_order_release);
+        g_state->play.delayed_sound_at.store(0, std::memory_order_relaxed);
+    }
 }
 
 } // namespace
@@ -1013,26 +1031,52 @@ bool handle_tap(int x, int y)
     // Content, per page.
     const int page = g_page.load(std::memory_order_relaxed);
     if (page == kPlay) {
-        if (g_play_screen != PlayScreen::Menu &&
-            in_rect(x, y, 242, 43, 66, 31)) {
+        if (g_play_screen != PlayScreen::Menu && in_rect(x, y, 242, 43, 66, 31)) {
             g_play_screen = PlayScreen::Menu;
+            g_state->play.screen.store(0, std::memory_order_release);
+            g_state->play.peek_visible.store(false, std::memory_order_relaxed);
         } else if (g_play_screen == PlayScreen::Menu) {
             if (in_rect(x, y, 18, 95, 284, 55)) {
                 g_play_screen = PlayScreen::Colors;
+                g_state->play.screen.store(1, std::memory_order_release);
                 g_play_color = -1;
+                g_play_quiz = false;
             } else if (in_rect(x, y, 18, 160, 284, 55)) {
                 g_play_screen = PlayScreen::Peekaboo;
-                g_peekaboo_visible = false;
+                g_state->play.screen.store(2, std::memory_order_release);
+                g_state->play.peek_visible.store(false, std::memory_order_relaxed);
             }
         } else if (g_play_screen == PlayScreen::Colors) {
-            for (int i = 0; i < 3; ++i) {
-                if (in_rect(x, y, 10 + i * 103, 85, 94, 105)) {
-                    g_play_color = i;
-                    break;
+            if (in_rect(x, y, 12, 43, 106, 31)) {
+                g_play_quiz = !g_play_quiz;
+                g_play_color = -1;
+                if (g_play_quiz) {
+                    g_play_target = static_cast<int>(esp_random() % 3);
+                    queue_play_audio(6 + g_play_target);  // "find [color]" in Persian
+                }
+            } else {
+                for (int i = 0; i < 3; ++i) {
+                    if (in_rect(x, y, 10 + i * 103, 89, 94, 106)) {
+                        g_play_color = i;
+                        g_state->play.selected_color.store(static_cast<std::int8_t>(i), std::memory_order_release);
+                        if (!g_play_quiz) {
+                            queue_play_audio(1 + i);  // name the selected color in Persian
+                        } else if (i == g_play_target) {
+                            queue_play_audio(4);  // "Bravo!"
+                            g_play_target = (g_play_target + 1 + static_cast<int>(esp_random() % 2)) % 3;
+                            g_state->play.delayed_sound_id.store(6 + g_play_target, std::memory_order_relaxed);
+                            g_state->play.delayed_sound_at.store(now_ms() + 1700, std::memory_order_release);
+                        } else {
+                            queue_play_audio(5); // "Try again"
+                        }
+                        break;
+                    }
                 }
             }
         } else if (g_play_screen == PlayScreen::Peekaboo) {
-            g_peekaboo_visible = !g_peekaboo_visible;
+            // Optional child tap: request an early reveal, while the normal
+            // automatic rhythm also operates without any touch.
+            g_state->play.peek_touch_requested.store(true, std::memory_order_release);
         }
         g_dirty.store(true, std::memory_order_relaxed);
         return true;
@@ -1237,7 +1281,7 @@ bool draw(avatar::RichCanvas& canvas)
     // fields (present-position from the servo task) and wants a faster refresh
     // so the captured raw doesn't lag the user's hand.
     const int page = g_page.load(std::memory_order_relaxed);
-    if (page == kInfo || page == kConversation || page == kLtTimer) {
+    if (page == kInfo || page == kConversation || page == kLtTimer || page == kPlay) {
         const std::uint32_t t = now_ms();
         if (t - g_last_info_ms > 500) {
             g_last_info_ms = t;
