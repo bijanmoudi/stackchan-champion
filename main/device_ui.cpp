@@ -779,9 +779,11 @@ void draw_play()
             g_cv->drawString(names[i], x + 47, 142);
         }
         g_cv->setFont(kFontTitle);
-        g_cv->setTextColor(g_play_quiz ? colors[g_play_target] :
+        // Quiz gives the answer through spoken Persian; don't reveal the
+        // target on-screen or the child can win without listening.
+        g_cv->setTextColor(g_play_quiz ? light :
                            (g_play_color >= 0 ? colors[g_play_color] : light));
-        const char* message = g_play_quiz ? names[g_play_target] :
+        const char* message = g_play_quiz ? stackchan::ui_text::get("play.listen") :
                               (g_play_color >= 0 ? names[g_play_color] : stackchan::ui_text::get("play.tap"));
         g_cv->drawString(message, kW / 2, 222);
         return;
