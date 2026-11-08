@@ -30,7 +30,7 @@ class GeminiSearchTests(unittest.TestCase):
         shared = (ROOT / "main/shared_state.hpp").read_text()
         task = (ROOT / "main/conversation_task.cpp").read_text()
         self.assertIn('kPlay = 7', ui)
-        self.assertIn('g_cv->drawString("DALI!"', ui)
+        self.assertIn('stackchan::ui_text::get("play.dali")', ui)
         self.assertIn('g_play_color >= 0 ? names[g_play_color]', ui)
         self.assertIn('std::atomic<bool> play_mode_active{false}', shared)
         self.assertIn('g_state->play_mode_active.store(page == kPlay', ui)
@@ -52,6 +52,19 @@ class GeminiSearchTests(unittest.TestCase):
         for word in ("دالی", "قرمز", "آبی", "زرد", "آفرین"):
             self.assertIn(word, generator)
         self.assertIn("python3 tools/generate_play_audio.py", workflow)
+
+    def test_central_english_ui_and_camera_trigger(self):
+        ui = (ROOT / "main/device_ui.cpp").read_text()
+        strings = (ROOT / "components/config_service/include/config_service/ui_english.hpp").read_text()
+        loop = (ROOT / "main/demo_loop.cpp").read_text()
+        camera = (ROOT / "main/camera_service.cpp").read_text()
+        self.assertIn("ui_text::get", ui)
+        for key in ("tabs.info", "tabs.settings1", "play.dali", "play.listen"):
+            self.assertIn(key, strings)
+        self.assertIn("sample_play_motion()", loop)
+        self.assertIn("MotionState::Changed", loop)
+        self.assertIn("if (event &&", loop)
+        self.assertIn("reset_play_motion()", camera)
 
     def test_search_preserves_local_tools(self):
         s = (ROOT / "components/conversation/gemini_live_client.cpp").read_text()
