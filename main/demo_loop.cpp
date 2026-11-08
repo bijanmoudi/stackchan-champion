@@ -416,6 +416,7 @@ constexpr const char* kTag = "stackchan";
         if (playing_game) {
             if (!was_playing_game) {
                 was_playing_game = true;
+                g_state->play_audio_active.store(true, std::memory_order_release);
                 previous_play_screen = 0;
                 seen_play_sound_seq = g_state->play.sound_sequence.load(std::memory_order_acquire);
                 play_pending_sound = -1;
@@ -496,6 +497,13 @@ constexpr const char* kTag = "stackchan";
             continue;
         }
         if (was_playing_game) {
+            // Do not hand the I2S bus to the cloud/mic while a clip is
+            // still draining after the parent closes the PLAY tab.
+            if (M5.Speaker.isPlaying()) {
+                vTaskDelay(pdMS_TO_TICKS(40));
+                continue;
+            }
+            g_state->play_audio_active.store(false, std::memory_order_release);
             was_playing_game = false;
             g_state->servo.target_pitch_deg.store(
                 std::clamp(0.0f, kPitchMinDeg, kPitchMaxDeg), std::memory_order_relaxed);
