@@ -25,6 +25,7 @@
 
 #include "avatar/expression.hpp"
 #include "battery.hpp"
+#include "camera_service.hpp"
 #include "device_ui.hpp"
 #include "lt_timer.hpp"
 #include "play_audio_assets.hpp"
@@ -200,6 +201,8 @@ constexpr const char* kTag = "stackchan";
     int play_pending_sound = -1;
     std::uint32_t play_speak_due_ms = 0;
     std::uint32_t next_peek_step_ms = 0;
+    std::uint32_t next_camera_sample_ms = 0;
+    std::uint32_t last_peek_event_ms = 0;
     std::uint8_t previous_play_screen = 0;
     bool was_playing_game = false;
     auto ulaw_decode = [](std::uint8_t encoded) -> std::int16_t {
@@ -428,23 +431,43 @@ constexpr const char* kTag = "stackchan";
             const std::uint8_t screen = g_state->play.screen.load(std::memory_order_acquire);
             if (screen != previous_play_screen) {
                 previous_play_screen = screen;
-                next_peek_step_ms = now_ms + 1400;
-                g_state->play.peek_visible.store(false, std::memory_order_relaxed);
+                // No automatic voice loop. Only a camera motion event or
+                // voluntary screen tap advances the peekaboo state.
+                next_peek_step_ms = now_ms + 1500;
+                next_camera_sample_ms = now_ms + 600;
+                last_peek_event_ms = now_ms;
+                camera_service::reset_play_motion();
+                g_state->play.peek_visible.store(true, std::memory_order_relaxed);
+                g_state->play.camera_mode.store(-1, std::memory_order_release);
                 g_state->play.peek_touch_requested.store(false, std::memory_order_relaxed);
                 g_state->play.delayed_sound_at.store(0, std::memory_order_relaxed);
                 if (screen == 2) {
                     g_state->servo.target_pitch_deg.store(
-                        std::clamp(10.0f, kPitchMinDeg, kPitchMaxDeg), std::memory_order_relaxed);
-                    ESP_LOGI("play", "peekaboo started: hide eyes, tilt head");
+                        std::clamp(0.0f, kPitchMinDeg, kPitchMaxDeg), std::memory_order_relaxed);
+                    ESP_LOGI("play", "peekaboo ready: waiting for camera movement or tap");
                 }
             }
 
             if (screen == 2) {
-                const bool early_touch =
-                    g_state->play.peek_touch_requested.exchange(false, std::memory_order_acq_rel);
-                if (early_touch || now_ms >= next_peek_step_ms) {
-                    const bool revealed =
-                        !g_state->play.peek_visible.load(std::memory_order_relaxed);
+                bool event = g_state->play.peek_touch_requested.exchange(
+                    false, std::memory_order_acq_rel);
+                if (now_ms >= next_camera_sample_ms) {
+                    next_camera_sample_ms = now_ms + 1250; // low-rate, minimize I2C stalls
+                    const auto motion = camera_service::sample_play_motion();
+                    if (motion == camera_service::MotionState::Unavailable) {
+                        g_state->play.camera_mode.store(0, std::memory_order_release);
+                    } else {
+                        g_state->play.camera_mode.store(1, std::memory_order_release);
+                        if (motion == camera_service::MotionState::Changed)
+                            event = true;
+                    }
+                }
+                // A scene change is not yet face recognition; debounce
+                // to prevent one child gesture from producing multiple calls.
+                if (event && static_cast<std::int32_t>(now_ms - last_peek_event_ms) >= 1600) {
+                    last_peek_event_ms = now_ms;
+                    const bool revealed = !g_state->play.peek_visible.load(
+                        std::memory_order_relaxed);
                     g_state->play.peek_visible.store(revealed, std::memory_order_release);
                     g_state->servo.target_pitch_deg.store(
                         std::clamp(revealed ? 0.0f : 10.0f, kPitchMinDeg, kPitchMaxDeg),
@@ -452,12 +475,11 @@ constexpr const char* kTag = "stackchan";
                     g_state->servo.target_yaw_deg.store(
                         std::clamp(0.0f, kYawMinDeg, kYawMaxDeg), std::memory_order_relaxed);
                     if (revealed) {
-                        play_pending_sound = 0; // "دالی"
-                        play_speak_due_ms = now_ms + 450; // head motion before sound
-                        next_peek_step_ms = now_ms + 2800;
-                    } else {
-                        next_peek_step_ms = now_ms + 1500;
+                        play_pending_sound = 0; // Persian "دالی"
+                        play_speak_due_ms = now_ms + 450;
                     }
+                    ESP_LOGI("play", "peekaboo %s (motion/tap)",
+                             revealed ? "revealed" : "hidden");
                 }
             }
 
