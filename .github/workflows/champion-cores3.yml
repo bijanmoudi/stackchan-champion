@@ -24,6 +24,7 @@ on:
       - '.github/workflows/champion-cores3.yml'
       - 'champion_tests/**'
       - 'docs/CHAMPION.md'
+      - 'docs/PLAY_V2.md'
 
 permissions:
   contents: read
