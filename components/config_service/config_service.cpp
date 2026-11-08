@@ -3,6 +3,7 @@
 
 #include <config_service/config_service.hpp>
 #include <config_service/config_store.hpp>
+#include <config_service/ui_english.hpp>
 #include "dis.hpp"
 #include "gatt_settings.hpp"
 
@@ -39,12 +40,12 @@ namespace stackchan::config {
 const char* operation_mode_label(OperationMode m)
 {
     switch (m) {
-    case OperationMode::MicLipSync:   return "マイクリップシンク";
-    case OperationMode::JttsRandom:   return "JTTSランダム発話";
-    case OperationMode::Conversation: return "会話応答";
-    case OperationMode::AsrLocal:     return "ローカル音声認識";
-    case OperationMode::EspNowRemote: return "ESP-NOWリモコン";
-    case OperationMode::EspNowSender: return "ESP-NOW姿勢配信";
+    case OperationMode::MicLipSync:   return stackchan::ui_text::get("mode.mic");
+    case OperationMode::JttsRandom:   return stackchan::ui_text::get("mode.jtts");
+    case OperationMode::Conversation: return stackchan::ui_text::get("mode.conversation");
+    case OperationMode::AsrLocal:     return stackchan::ui_text::get("mode.asr");
+    case OperationMode::EspNowRemote: return stackchan::ui_text::get("mode.espnow_remote");
+    case OperationMode::EspNowSender: return stackchan::ui_text::get("mode.espnow_sender");
     }
     return "?";
 }
