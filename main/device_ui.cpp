@@ -273,6 +273,27 @@ TabBar layout_tabbar()
     return b;
 }
 
+// Keep translated English labels within physical 320x240 touch targets.
+// Fit by actual LCD glyph metrics, never by UTF-8 byte count. Ellipsis is
+// ASCII for the built-in font. This prevents adjacent row labels from
+// visually running into one another.
+void draw_fitted(const char* value, int x, int y, int max_width)
+{
+    if (max_width <= 0 || value == nullptr) return;
+    std::string fitted(value);
+    const char* dots = "...";
+    while (!fitted.empty() && g_cv->textWidth(fitted.c_str()) > max_width) {
+        fitted.pop_back();
+    }
+    if (fitted != value) {
+        while (!fitted.empty() &&
+               g_cv->textWidth((fitted + dots).c_str()) > max_width)
+            fitted.pop_back();
+        fitted += dots;
+    }
+    g_cv->drawString(fitted.c_str(), x, y);
+}
+
 // --- Drawing -------------------------------------------------------------
 
 void draw_topbar(int page)
@@ -301,7 +322,7 @@ void draw_topbar(int page)
         const TabSlot& s = b.slots[i];
         if (s.index == page) g_cv->fillRect(s.x, 0, s.w, kBarH, sel);
         g_cv->setTextColor(fg);
-        g_cv->drawString(kTabLabels[s.index], s.x + s.w / 2, kBarH / 2);
+        draw_fitted(kTabLabels[s.index], s.x + s.w / 2, kBarH / 2, s.w - 8);
     }
     // Close button.
     g_cv->fillRect(b.close_x, 0, kCloseW, kBarH, g_cv->color565(120, 60, 60));
@@ -315,9 +336,9 @@ void draw_kv(int y, const char* key, const char* value, std::uint16_t vcolor)
     g_cv->setFont(kFontBody);
     g_cv->setTextDatum(lgfx::textdatum_t::top_left);
     g_cv->setTextColor(dim);
-    g_cv->drawString(key, 12, y);
+    draw_fitted(key, 12, y, 102);
     g_cv->setTextColor(vcolor);
-    g_cv->drawString(value, 120, y);
+    draw_fitted(value, 120, y, kW - 132);
 }
 
 void draw_info()
@@ -387,10 +408,10 @@ void draw_value_row(int i, const char* label, const char* value, int row_h = kRo
     g_cv->setFont(kFontBody);
     g_cv->setTextDatum(lgfx::textdatum_t::middle_left);
     g_cv->setTextColor(g_cv->color565(235, 235, 235));
-    g_cv->drawString(label, rx + 12, ry + rh / 2);
+    draw_fitted(label, rx + 12, ry + rh / 2, 138);
     g_cv->setTextDatum(lgfx::textdatum_t::middle_right);
     g_cv->setTextColor(g_cv->color565(120, 180, 230));
-    g_cv->drawString(value, rx + rw - 12, ry + rh / 2);
+    draw_fitted(value, rx + rw - 12, ry + rh / 2, 126);
 }
 
 const char* op_mode_label(std::uint8_t m)
@@ -416,7 +437,7 @@ void draw_toggle_row(int i, const char* label, bool on, int row_h = kRowH)
     g_cv->setFont(kFontBody);
     g_cv->setTextDatum(lgfx::textdatum_t::middle_left);
     g_cv->setTextColor(g_cv->color565(235, 235, 235));
-    g_cv->drawString(label, rx + 12, ry + rh / 2);
+    draw_fitted(label, rx + 12, ry + rh / 2, rw - 100);
     // Pill switch on the right.
     const int pw = 58, ph = 26;
     const int px = rx + rw - pw - 10, py = ry + (rh - ph) / 2;
@@ -436,7 +457,7 @@ void draw_button(int i, const char* label, std::uint16_t color, int row_h = kRow
     g_cv->setFont(kFontBody);
     g_cv->setTextDatum(lgfx::textdatum_t::middle_center);
     g_cv->setTextColor(g_cv->color565(245, 245, 245));
-    g_cv->drawString(label, rx + rw / 2, ry + rh / 2);
+    draw_fitted(label, rx + rw / 2, ry + rh / 2, rw - 24);
 }
 
 // Settings is split across two tabs so the 6 toggles + apply button fit
@@ -458,8 +479,8 @@ void draw_settings()
     g_cv->setFont(kFontBody);
     g_cv->setTextDatum(lgfx::textdatum_t::top_left);
     g_cv->setTextColor(g_cv->color565(150, 150, 150));
-    g_cv->drawString(stackchan::ui_text::get("settings.swipe_tip"),
-                     12, kContentY + 4 * kSettingsRowH + 4);
+    draw_fitted(stackchan::ui_text::get("settings.swipe_tip"),
+                12, kContentY + 4 * kSettingsRowH + 4, kW - 24);
 }
 
 void draw_settings2()
@@ -472,8 +493,8 @@ void draw_settings2()
     g_cv->setFont(kFontBody);
     g_cv->setTextDatum(lgfx::textdatum_t::top_left);
     g_cv->setTextColor(g_cv->color565(150, 150, 150));
-    g_cv->drawString(stackchan::ui_text::get("settings.apply_hint"),
-                     12, kContentY + 3 * kSettingsRowH + 4);
+    draw_fitted(stackchan::ui_text::get("settings.apply_hint"),
+                12, kContentY + 3 * kSettingsRowH + 4, kW - 24);
 }
 
 void draw_control()
@@ -642,7 +663,9 @@ void draw_conversation()
     case ConvStatus::Talking: status_text = stackchan::ui_text::get("common.talking"); status_color = ok; break;
     case ConvStatus::Yielded: status_text = stackchan::ui_text::get("common.playback"); status_color = dim; break;
     case ConvStatus::Reconnecting: status_text = stackchan::ui_text::get("common.reconnecting"); status_color = warn; break;
-    case ConvStatus::Error: status_text = stackchan::ui_text::get("common.error"); status_color = err; break;
+    case ConvStatus::Error: status_text = stackchan::ui_text::get(
+        g_state->conv.quota_exceeded.load(std::memory_order_relaxed) ?
+        "info.quota_error" : "common.error"); status_color = err; break;
     case ConvStatus::UserSpeaking: status_text = stackchan::ui_text::get("common.hearing"); status_color = ok; break;
     case ConvStatus::Thinking: status_text = stackchan::ui_text::get("common.thinking"); status_color = ok; break;
     case ConvStatus::ToolRunning: status_text = stackchan::ui_text::get("common.tool"); status_color = ok; break;
