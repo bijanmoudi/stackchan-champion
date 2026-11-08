@@ -578,6 +578,14 @@ constexpr const char* kTag = "stackchan";
                 }
             }
 
+            // Unlock answers after real speaker playback completes.
+            if (play_clip_started && !M5.Speaker.isPlaying() &&
+                static_cast<std::int32_t>(now_ms - play_clip_start_ms) > 120) {
+                play_clip_started = false;
+                g_state->play.audio_busy.store(false, std::memory_order_release);
+                ESP_LOGI("play-audio", "clip finished; quiz can accept input");
+            }
+
             const std::uint32_t seq =
                 g_state->play.sound_sequence.load(std::memory_order_acquire);
             if (seq != seen_play_sound_seq) {
