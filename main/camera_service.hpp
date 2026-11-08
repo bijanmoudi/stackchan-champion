@@ -51,5 +51,21 @@ enum class MotionState : std::uint8_t { Unavailable, Baseline, Still, Changed };
 void reset_play_motion();
 MotionState sample_play_motion();
 
+// Optional on-device MSR/MNP neural face detector (ESP-DL).
+// No identity recognition or enrollment; image never leaves local RAM.
+// 'Found' includes the normalized position for a *bounded* servo tracking
+// gesture. False negatives are possible when the child covers their eyes.
+enum class FaceState : std::uint8_t { Unavailable, NotFound, Found };
+struct FaceResult {
+    FaceState state{FaceState::Unavailable};
+    float center_x{0.5f};       // 0..1 from camera left to right
+    float center_y{0.5f};       // 0..1 from image top to bottom
+    float width{0.0f};          // normalized bounding box
+    float height{0.0f};
+    float confidence{0.0f};
+};
+FaceResult sample_play_face();
+
+
 
 } // namespace stackchan::app::camera_service
