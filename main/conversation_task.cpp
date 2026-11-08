@@ -300,9 +300,11 @@ public:
             // stop the client entirely so internal RAM rebounds; the
             // streamer publishes conversation_yielded_i2s once we're
             // fully torn down. On clear we reconnect from scratch.
-            if (state_.audio_stream_active.load(std::memory_order_acquire)) {
+            if (state_.audio_stream_active.load(std::memory_order_acquire) ||
+                (state_.play_mode_active.load(std::memory_order_acquire) ||
+                 state_.play_audio_active.load(std::memory_order_acquire))) {
                 if (local_ != Local::Yielded) {
-                    ESP_LOGI(kTag, "yielding to BLE audio stream — stopping conversation");
+                    ESP_LOGI(kTag, "yielding to local PLAY / audio stream — stopping cloud conversation");
                     M5.Mic.end();
                     M5.Speaker.end();
                     state_.face.mouth_open.store(0.0f, std::memory_order_relaxed);
@@ -320,7 +322,7 @@ public:
                 continue;
             }
             if (local_ == Local::Yielded) {
-                ESP_LOGI(kTag, "BLE audio done — restarting conversation");
+                ESP_LOGI(kTag, "local PLAY / audio stream done — restarting conversation");
                 state_.conv.yielded_i2s.store(false, std::memory_order_release);
                 if (!connect()) {
                     ESP_LOGW(kTag, "reconnect after audio stream failed; retrying in 5 s");
@@ -513,7 +515,9 @@ private:
             // the main loop's yield path will stop us cleanly and there's
             // no point reconnecting just to be torn down. This also keeps
             // the reconnect storm from stealing CPU / radio from playback.
-            if (state_.audio_stream_active.load(std::memory_order_acquire)) {
+            if (state_.audio_stream_active.load(std::memory_order_acquire) ||
+                (state_.play_mode_active.load(std::memory_order_acquire) ||
+                 state_.play_audio_active.load(std::memory_order_acquire))) {
                 ESP_LOGI(kTag, "recover aborted — BLE audio active");
                 return;
             }

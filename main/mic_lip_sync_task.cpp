@@ -306,6 +306,7 @@ void mic_lip_sync_task_entry(void* arg)
         return;
     }
 
+    state->mic_lip_task_running.store(true, std::memory_order_release);
     std::array<std::int16_t, kChunkSamples> buf{};
     bool mic_owned = false;
     float smoothed = 0.0f;
@@ -318,6 +319,21 @@ void mic_lip_sync_task_entry(void* arg)
              static_cast<unsigned>(kSampleRate), static_cast<unsigned>(kChunkSamples));
 
     for (;;) {
+        // Interactive games own the I2S speaker. Park the mic entirely so
+        // the game can speak without being raced by this lip-sync loop.
+        if (state->play_mode_active.load(std::memory_order_acquire) ||
+            state->play_audio_active.load(std::memory_order_acquire)) {
+            if (mic_owned) {
+                M5.Mic.end();
+                vTaskDelay(kI2sSettle);
+                mic_owned = false;
+            }
+            state->mic_lip_yielded.store(true, std::memory_order_release);
+            vTaskDelay(pdMS_TO_TICKS(40));
+            continue;
+        }
+        state->mic_lip_yielded.store(false, std::memory_order_release);
+
         // Speaker takes precedence: if any other producer (balloon say, MCP
         // say, jtts babble-in-emergency-fallback) starts playing, release
         // the mic so the I2S bus is free for the speaker. We pick the mic

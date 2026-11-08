@@ -25,6 +25,34 @@ class GeminiSearchTests(unittest.TestCase):
         self.assertIn('client_->stop();', task)
         self.assertIn('state_.conv.status.store(ConvStatus::Error', task)
 
+    def test_offline_play_ui_and_cloud_pause(self):
+        ui = (ROOT / "main/device_ui.cpp").read_text()
+        shared = (ROOT / "main/shared_state.hpp").read_text()
+        task = (ROOT / "main/conversation_task.cpp").read_text()
+        self.assertIn('kPlay = 7', ui)
+        self.assertIn('g_cv->drawString("DALI!"', ui)
+        self.assertIn('g_play_color >= 0 ? names[g_play_color]', ui)
+        self.assertIn('std::atomic<bool> play_mode_active{false}', shared)
+        self.assertIn('g_state->play_mode_active.store(page == kPlay', ui)
+        self.assertIn('state_.play_mode_active.load(std::memory_order_acquire)', task)
+
+    def test_offline_game_uses_audio_and_servo(self):
+        loop = (ROOT / "main/demo_loop.cpp").read_text()
+        ui = (ROOT / "main/device_ui.cpp").read_text()
+        mic = (ROOT / "main/mic_lip_sync_task.cpp").read_text()
+        generator = (ROOT / "tools/generate_play_audio.py").read_text()
+        workflow = (ROOT / ".github/workflows/champion-cores3.yml").read_text()
+        self.assertIn("play_audio_assets.hpp", loop)
+        self.assertIn("play_local_clip(play_pending_sound)", loop)
+        self.assertIn("play_pcm.data()", loop)
+        self.assertIn("std::clamp(revealed ? 0.0f : 10.0f", loop)
+        self.assertIn("state->mic_lip_yielded.store(true", mic)
+        self.assertIn("queue_play_audio(1 + i)", ui)
+        self.assertIn("g_play_quiz = !g_play_quiz", ui)
+        for word in ("دالی", "قرمز", "آبی", "زرد", "آفرین"):
+            self.assertIn(word, generator)
+        self.assertIn("python3 tools/generate_play_audio.py", workflow)
+
     def test_search_preserves_local_tools(self):
         s = (ROOT / "components/conversation/gemini_live_client.cpp").read_text()
         a = s.index('cJSON_AddObjectToObject(search_tool, "googleSearch");')
