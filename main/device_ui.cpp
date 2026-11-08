@@ -799,7 +799,13 @@ void draw_play()
         g_cv->fillCircle(212, 132, 16, g_cv->color565(35, 40, 60));
         g_cv->setTextColor(g_cv->color565(250, 185, 80));
         g_cv->setFont(kFontTitle);
-        g_cv->drawString(stackchan::ui_text::get("play.dali"), kW / 2, 210);
+        const bool celebrating = static_cast<std::int32_t>(
+            g_state->play.dali_until_ms.load(std::memory_order_acquire) - now_ms()) > 0;
+        const int camera_mode = g_state->play.camera_mode.load(std::memory_order_acquire);
+        const char* label = celebrating ? stackchan::ui_text::get("play.dali") :
+                            camera_mode == 0 ? stackchan::ui_text::get("play.tap_to_play") :
+                                               stackchan::ui_text::get("play.move");
+        g_cv->drawString(label, kW / 2, 210);
     } else {
         // Cartoon hands covering the eyes (visual only, no physical arms).
         g_cv->fillRoundRect(50, 92, 220, 94, 24, g_cv->color565(230, 168, 110));
