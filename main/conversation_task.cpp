@@ -301,7 +301,8 @@ public:
             // streamer publishes conversation_yielded_i2s once we're
             // fully torn down. On clear we reconnect from scratch.
             if (state_.audio_stream_active.load(std::memory_order_acquire) ||
-                state_.play_mode_active.load(std::memory_order_acquire)) {
+                (state_.play_mode_active.load(std::memory_order_acquire) ||
+                 state_.play_audio_active.load(std::memory_order_acquire))) {
                 if (local_ != Local::Yielded) {
                     ESP_LOGI(kTag, "yielding to local PLAY / audio stream — stopping cloud conversation");
                     M5.Mic.end();
@@ -515,7 +516,8 @@ private:
             // no point reconnecting just to be torn down. This also keeps
             // the reconnect storm from stealing CPU / radio from playback.
             if (state_.audio_stream_active.load(std::memory_order_acquire) ||
-                state_.play_mode_active.load(std::memory_order_acquire)) {
+                (state_.play_mode_active.load(std::memory_order_acquire) ||
+                 state_.play_audio_active.load(std::memory_order_acquire))) {
                 ESP_LOGI(kTag, "recover aborted — BLE audio active");
                 return;
             }
