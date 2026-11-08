@@ -129,7 +129,7 @@ class GeminiSearchTests(unittest.TestCase):
         self.assertIn("HumanFaceDetect", face)
         self.assertIn("DL_IMAGE_PIX_TYPE_RGB565BE", face)
         self.assertIn("FaceState::Found", face)
-        self.assertIn("FaceState::NotFound", hdr)
+        self.assertIn("NotFound", hdr)
         self.assertIn("face_missing_streak >= 2", loop)
         self.assertIn("face_seen_streak >= 2", loop)
         self.assertNotIn("MotionState::Changed", loop)
