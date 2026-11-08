@@ -212,6 +212,7 @@ public:
         std::atomic<std::uint32_t> delayed_sound_at{0};
         std::atomic<bool> peek_touch_requested{false};
         std::atomic<int> camera_mode{-1}; // -1 waiting; 0 unavailable; 1 motion sampling
+        std::atomic<std::uint32_t> dali_until_ms{0};
     } play;
     // I2S ownership handshake: no local speech until the standalone
     // MicLipSync task has relinquished the mic.
