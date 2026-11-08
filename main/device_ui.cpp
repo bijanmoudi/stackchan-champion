@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 #include "device_ui.hpp"
+#include "play_dialogue.hpp"
 #include <config_service/ui_english.hpp>
 
 #include <atomic>
@@ -79,6 +80,8 @@ bool g_play_quiz = false;
 int g_play_target = 0;
 void queue_play_audio(int id)
 {
+    if (id < 0 || id >= play_dialogue::Count) return;
+    g_state->play.audio_busy.store(true, std::memory_order_release);
     g_state->play.sound_id.store(id, std::memory_order_relaxed);
     g_state->play.sound_sequence.fetch_add(1, std::memory_order_release);
 }
@@ -806,7 +809,9 @@ void draw_play()
         // target on-screen or the child can win without listening.
         g_cv->setTextColor(g_play_quiz ? light :
                            (g_play_color >= 0 ? colors[g_play_color] : light));
-        const char* message = g_play_quiz ? stackchan::ui_text::get("play.listen") :
+        const bool listening = g_state->play.audio_busy.load(std::memory_order_acquire);
+        const char* message = g_play_quiz ? stackchan::ui_text::get(
+            listening ? "play.listening" : "play.listen") :
                               (g_play_color >= 0 ? names[g_play_color] : stackchan::ui_text::get("play.tap"));
         g_cv->drawString(message, kW / 2, 222);
         return;
@@ -1073,38 +1078,47 @@ bool handle_tap(int x, int y)
                 g_play_screen = PlayScreen::Colors;
                 g_state->play.screen.store(1, std::memory_order_release);
                 g_play_color = -1;
-                g_play_quiz = false;
-                queue_play_audio(9); // local Persian welcome to Colors
+                g_play_quiz = true; // Spoken challenge starts automatically.
+                g_play_target = static_cast<int>(esp_random() % 3);
+                queue_play_audio(play_dialogue::initial(g_play_target));
             } else if (in_rect(x, y, 18, 160, 284, 55)) {
                 g_play_screen = PlayScreen::Peekaboo;
                 g_state->play.screen.store(2, std::memory_order_release);
                 g_state->play.peek_visible.store(false, std::memory_order_relaxed);
             }
         } else if (g_play_screen == PlayScreen::Colors) {
+            // Avoid accepting a guess before the spoken prompt finishes.
+            if (g_state->play.audio_busy.load(std::memory_order_acquire))
+                return true;
             if (in_rect(x, y, 12, 43, 106, 31)) {
+                // PLAY GAME is the default; EXPLORE is an optional teach mode.
                 g_play_quiz = !g_play_quiz;
                 g_play_color = -1;
                 if (g_play_quiz) {
                     g_play_target = static_cast<int>(esp_random() % 3);
-                    queue_play_audio(6 + g_play_target);  // "find [color]" in Persian
+                    queue_play_audio(play_dialogue::initial(g_play_target));
                 }
             } else {
                 for (int i = 0; i < 3; ++i) {
-                    if (in_rect(x, y, 10 + i * 103, 89, 94, 106)) {
-                        g_play_color = i;
-                        g_state->play.selected_color.store(static_cast<std::int8_t>(i), std::memory_order_release);
-                        if (!g_play_quiz) {
-                            queue_play_audio(1 + i);  // name the selected color in Persian
-                        } else if (i == g_play_target) {
-                            queue_play_audio(4);  // "Bravo!"
-                            g_play_target = (g_play_target + 1 + static_cast<int>(esp_random() % 2)) % 3;
-                            g_state->play.delayed_sound_id.store(6 + g_play_target, std::memory_order_relaxed);
-                            g_state->play.delayed_sound_at.store(now_ms() + 1700, std::memory_order_release);
-                        } else {
-                            queue_play_audio(5); // "Try again"
-                        }
-                        break;
+                    if (!in_rect(x, y, 10 + i * 103, 89, 94, 106)) continue;
+                    g_play_color = i;
+                    g_state->play.selected_color.store(
+                        static_cast<std::int8_t>(i), std::memory_order_release);
+                    if (!g_play_quiz) {
+                        queue_play_audio(1 + i); // teach selected Persian colour
+                    } else if (i == g_play_target) {
+                        const int next = (g_play_target + 1 +
+                                          static_cast<int>(esp_random() % 2)) % 3;
+                        // Single expressive response: praise, name the
+                        // correct colour, and ask the next question.
+                        queue_play_audio(play_dialogue::correct(i, next));
+                        g_play_target = next;
+                    } else {
+                        // Give gentle, specific feedback: name the selected
+                        // colour and repeat the requested target.
+                        queue_play_audio(play_dialogue::incorrect(i, g_play_target));
                     }
+                    break;
                 }
             }
         } else if (g_play_screen == PlayScreen::Peekaboo) {
