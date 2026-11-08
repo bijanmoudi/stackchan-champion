@@ -1074,6 +1074,7 @@ bool handle_tap(int x, int y)
                 g_state->play.screen.store(1, std::memory_order_release);
                 g_play_color = -1;
                 g_play_quiz = false;
+                queue_play_audio(9); // local Persian welcome to Colors
             } else if (in_rect(x, y, 18, 160, 284, 55)) {
                 g_play_screen = PlayScreen::Peekaboo;
                 g_state->play.screen.store(2, std::memory_order_release);
