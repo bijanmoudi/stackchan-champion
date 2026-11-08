@@ -215,7 +215,7 @@ constexpr const char* kTag = "stackchan";
     };
     auto play_local_clip = [&](int clip_id) {
         if (clip_id < 0 || clip_id >= static_cast<int>(sizeof(play_audio::kClips) /
-                                                       sizeof(play_audio::kClips[0]))) return;
+                                                       sizeof(play_audio::kClips[0]))) return false;
         const auto& clip = play_audio::kClips[clip_id];
         // Assets are 16 kHz mu-law, not 8 kHz duplicated into 16 kHz.
         // Higher source bandwidth improves intelligibility of Persian clips.
