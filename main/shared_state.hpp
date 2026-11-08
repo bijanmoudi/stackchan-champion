@@ -197,6 +197,9 @@ public:
     // conversation coordinator yields the mic + WebSocket and resumes on
     // exit. Local UI touch games never send text or audio to an API.
     std::atomic<bool> play_mode_active{false};
+    // Remain paused until the last locally playing audio clip has drained
+    // after leaving the PLAY screen (avoids reclaiming I2S mid-sentence).
+    std::atomic<bool> play_audio_active{false};
     // React-to-touch game state. This is published by the on-device UI and
     // consumed by the local demo task; no Gemini traffic is involved.
     struct Play {
