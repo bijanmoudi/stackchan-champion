@@ -476,6 +476,7 @@ constexpr const char* kTag = "stackchan";
                         std::clamp(0.0f, kYawMinDeg, kYawMaxDeg), std::memory_order_relaxed);
                     if (revealed) {
                         play_pending_sound = 0; // Persian "دالی"
+                        g_state->play.dali_until_ms.store(now_ms + 1800, std::memory_order_release);
                         play_speak_due_ms = now_ms + 450;
                     }
                     ESP_LOGI("play", "peekaboo %s (motion/tap)",
