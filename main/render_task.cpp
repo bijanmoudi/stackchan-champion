@@ -318,7 +318,7 @@ void render_task_entry(void* arg)
                 const int inset = args.circular_display
                     ? static_cast<int>(canvas_w * (1.0f - 0.70710678f) * 0.5f) + 4
                     : 6;
-                draw_conv_status(canvas, cs, g_state->conv.quota_exceeded.load(std::memory_order_relaxed), static_cast<int>(canvas_w), inset, inset);
+                draw_conv_status(canvas, cs, state->conv.quota_exceeded.load(std::memory_order_relaxed), static_cast<int>(canvas_w), inset, inset);
             }
         }
 
