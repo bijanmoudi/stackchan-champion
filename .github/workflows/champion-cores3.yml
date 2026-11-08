@@ -9,9 +9,11 @@ on:
       - feature/offline-play-mvp
       - feature/play-v2-camera-i18n
       - feature/play-v3-hardware-fixes
+      - feature/play-v4-kids-dialogue-face-gate
     paths:
       - 'main/conversation_task.cpp'
       - 'main/device_ui.cpp'
+      - 'main/play_dialogue.hpp'
       - 'main/demo_loop.cpp'
       - 'main/camera_service.cpp'
       - 'main/render_task.cpp'
@@ -26,6 +28,7 @@ on:
       - 'champion_tests/**'
       - 'docs/CHAMPION.md'
       - 'docs/PLAY_V2.md'
+      - 'docs/PLAY_V4.md'
 
 permissions:
   contents: read

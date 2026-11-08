@@ -20,6 +20,26 @@ CLIPS = [
     ("FIND_BLUE", "آبی رو پیدا کن"),
     ("FIND_YELLOW", "زرد رو پیدا کن"),
     ("INTRO_COLORS", "بیا با رنگ‌ها بازی کنیم!"),
+    # Start speaking as soon as COLORS opens: include instructions and target
+    # in one expressive clip; the child need not press FIND GAME first.
+    ("START_RED", "سلام قهرمان کوچولو! بیا با هم رنگ‌بازی کنیم! اول قرمز رو پیدا کن!"),
+    ("START_BLUE", "سلام قهرمان کوچولو! بیا با هم رنگ‌بازی کنیم! اول آبی رو پیدا کن!"),
+    ("START_YELLOW", "سلام قهرمان کوچولو! بیا با هم رنگ‌بازی کنیم! اول زرد رو پیدا کن!"),
+    # Correct answers include the chosen colour and the NEXT prompt in one
+    # fluent sentence. Avoid clipped, disconnected 'bravo' + 'find' snippets.
+    ("CORRECT_RED_THEN_BLUE", "آفرین! درست پیدا کردی! این قرمز بود! حالا آبی رو پیدا کن!"),
+    ("CORRECT_RED_THEN_YELLOW", "آفرین! درست پیدا کردی! این قرمز بود! حالا زرد رو پیدا کن!"),
+    ("CORRECT_BLUE_THEN_RED", "عالی بود! این آبیه! حالا قرمز رو پیدا کن!"),
+    ("CORRECT_BLUE_THEN_YELLOW", "عالی بود! این آبیه! حالا زرد رو پیدا کن!"),
+    ("CORRECT_YELLOW_THEN_RED", "آفرین! این زرد بود! حالا قرمز رو پیدا کن!"),
+    ("CORRECT_YELLOW_THEN_BLUE", "آفرین! این زرد بود! حالا آبی رو پیدا کن!"),
+    # Gentle corrective feedback names what was touched and repeats the goal.
+    ("WRONG_RED_FOR_BLUE", "خوب امتحان کردی! این قرمزه. ما دنبال آبی هستیم. آبی کجاست؟"),
+    ("WRONG_RED_FOR_YELLOW", "خوب امتحان کردی! این قرمزه. ما دنبال زرد هستیم. زرد کجاست؟"),
+    ("WRONG_BLUE_FOR_RED", "نه عزیزم، این آبیه. یه بار دیگه قرمز رو پیدا کن!"),
+    ("WRONG_BLUE_FOR_YELLOW", "نه عزیزم، این آبیه. یه بار دیگه زرد رو پیدا کن!"),
+    ("WRONG_YELLOW_FOR_RED", "این زرده! خیلی خوب تلاش کردی. حالا قرمز رو پیدا کن!"),
+    ("WRONG_YELLOW_FOR_BLUE", "این زرده! خیلی خوب تلاش کردی. حالا آبی رو پیدا کن!"),
 ]
 
 def ulaw_encode(sample):

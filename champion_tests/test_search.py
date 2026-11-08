@@ -82,12 +82,43 @@ class GeminiSearchTests(unittest.TestCase):
         self.assertIn("playRaw=%s", loop)
         self.assertIn("M5.Speaker.begin()", loop)
         self.assertIn("if (play_local_clip(play_pending_sound))", loop)
-        self.assertIn("queue_play_audio(9)", ui)
+        self.assertIn("queue_play_audio(play_dialogue::initial(g_play_target))", ui)
         self.assertIn('("INTRO_COLORS"', voice)
         self.assertIn("--preview-dir build_audio_preview", workflow)
         self.assertIn("release/cores3/audio_preview", workflow)
         self.assertIn("quota_exceeded", render)
         self.assertIn("quota_exceeded", shared)
+
+    def test_v4_spoken_color_dialogue(self):
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location(
+            "play_audio", ROOT / "tools/generate_play_audio.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        clips = module.CLIPS
+        assert len(clips) == 25, len(clips)
+        labels = [key for key, _ in clips]
+        assert len(labels) == len(set(labels)), "duplicated clip name"
+        assert labels[10:13] == ["START_RED", "START_BLUE", "START_YELLOW"]
+        assert labels[-1] == "WRONG_YELLOW_FOR_BLUE"
+        for label, phrase in clips[13:]:
+            assert len(phrase) > 20, label
+            assert "!" in phrase or "؟" in phrase, label
+        ui = (ROOT / "main/device_ui.cpp").read_text()
+        loop = (ROOT / "main/demo_loop.cpp").read_text()
+        hdr = (ROOT / "main/play_dialogue.hpp").read_text()
+        state = (ROOT / "main/shared_state.hpp").read_text()
+        self.assertIn("g_play_quiz = true; // Spoken challenge starts automatically.", ui)
+        self.assertIn("play_dialogue::initial(g_play_target)", ui)
+        self.assertIn("play_dialogue::correct(i, next)", ui)
+        self.assertIn("play_dialogue::incorrect(i, g_play_target)", ui)
+        self.assertIn("g_state->play.audio_busy.load", ui)
+        self.assertIn("play_clip_started && !M5.Speaker.isPlaying()", loop)
+        self.assertIn("audio_busy.store(false", loop)
+        self.assertIn("audio_busy{false}", state)
+        self.assertIn("static_assert(initial(0) == 10", hdr)
+        self.assertNotIn("seen_play_sound_seq = g_state->play.sound_sequence", loop.split("if (!was_playing_game) {", 1)[1].split("const std::uint8_t screen", 1)[0])
 
     def test_search_preserves_local_tools(self):
         s = (ROOT / "components/conversation/gemini_live_client.cpp").read_text()

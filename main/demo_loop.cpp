@@ -199,6 +199,9 @@ constexpr const char* kTag = "stackchan";
     std::vector<std::int16_t> play_pcm;
     std::uint32_t seen_play_sound_seq = 0;
     int play_pending_sound = -1;
+    bool play_clip_started = false;
+    std::uint32_t play_clip_start_ms = 0;
+    int play_send_failures = 0;
     std::uint32_t play_speak_due_ms = 0;
     std::uint32_t next_peek_step_ms = 0;
     std::uint32_t next_camera_sample_ms = 0;
@@ -436,8 +439,11 @@ constexpr const char* kTag = "stackchan";
                 was_playing_game = true;
                 g_state->play_audio_active.store(true, std::memory_order_release);
                 previous_play_screen = 0;
-                seen_play_sound_seq = g_state->play.sound_sequence.load(std::memory_order_acquire);
+                // Do not copy sound_sequence here: the UI may have already
+                // queued the first COLORS question before demo_loop sees
+                // PLAY. Copying the sequence silently discarded that clip.
                 play_pending_sound = -1;
+                play_clip_started = false;
                 if (speech.is_speaking()) speech.stop();
                 g_state->face.mouth_open.store(0.0f, std::memory_order_relaxed);
                 ESP_LOGI("play", "offline play entered");
@@ -499,12 +505,22 @@ constexpr const char* kTag = "stackchan";
                 }
             }
 
+            // The UI locks colour input until the *actual* last speech
+            // has completed (not until a fixed delay). This makes it
+            // possible to listen to the whole question before choosing.
+            if (play_clip_started && !M5.Speaker.isPlaying() &&
+                static_cast<std::int32_t>(now_ms - play_clip_start_ms) > 120) {
+                play_clip_started = false;
+                g_state->play.audio_busy.store(false, std::memory_order_release);
+                ESP_LOGI("play-audio", "clip finished; quiz can accept input");
+            }
             const std::uint32_t seq =
                 g_state->play.sound_sequence.load(std::memory_order_acquire);
             if (seq != seen_play_sound_seq) {
                 seen_play_sound_seq = seq;
                 play_pending_sound = g_state->play.sound_id.load(std::memory_order_relaxed);
                 play_speak_due_ms = now_ms;
+                play_send_failures = 0;
             }
             const std::uint32_t delayed_at =
                 g_state->play.delayed_sound_at.load(std::memory_order_acquire);
@@ -529,10 +545,19 @@ constexpr const char* kTag = "stackchan";
                 static_cast<std::int32_t>(now_ms - play_speak_due_ms) >= 0) {
                 if (play_local_clip(play_pending_sound)) {
                     play_pending_sound = -1;
+                    play_clip_started = true;
+                    play_clip_start_ms = now_ms;
+                    play_send_failures = 0;
                 } else {
-                    // Retain pending phrase; don't silently lose the prompt.
-                    // Back off rather than repeatedly resetting I2S.
+                    // Retain pending phrase, with bounded retries rather
+                    // than blocking the toddler game indefinitely.
                     play_speak_due_ms = now_ms + 700;
+                    if (++play_send_failures >= 3) {
+                        ESP_LOGE("play-audio", "three playRaw failures; unlock game");
+                        play_pending_sound = -1;
+                        g_state->play.audio_busy.store(false,
+                                                       std::memory_order_release);
+                    }
                 }
             }
 
@@ -547,6 +572,9 @@ constexpr const char* kTag = "stackchan";
                 continue;
             }
             g_state->play_audio_active.store(false, std::memory_order_release);
+            seen_play_sound_seq = g_state->play.sound_sequence.load(std::memory_order_acquire);
+            g_state->play.audio_busy.store(false, std::memory_order_release);
+            play_clip_started = false;
             was_playing_game = false;
             g_state->servo.target_pitch_deg.store(
                 std::clamp(0.0f, kPitchMinDeg, kPitchMaxDeg), std::memory_order_relaxed);
