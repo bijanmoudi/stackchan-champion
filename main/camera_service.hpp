@@ -44,4 +44,12 @@ void init_resident(stackchan::board::Board& board);
 // the 撮影 section.
 void register_sinks(SharedState& state);
 
+// Experimental, local-only PLAY motion trigger (not human-face recognition).
+// Samples the resident RGB565 camera under the existing I2C/PSRAM guard.
+// No image data is logged, uploaded or saved. May respond to non-face motion.
+enum class MotionState : std::uint8_t { Unavailable, Baseline, Still, Changed };
+void reset_play_motion();
+MotionState sample_play_motion();
+
+
 } // namespace stackchan::app::camera_service
