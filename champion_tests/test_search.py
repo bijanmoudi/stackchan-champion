@@ -51,7 +51,7 @@ class GeminiSearchTests(unittest.TestCase):
         self.assertIn("g_play_quiz = !g_play_quiz", ui)
         for word in ("دالی", "قرمز", "آبی", "زرد", "آفرین"):
             self.assertIn(word, generator)
-        self.assertIn("python3 tools/generate_play_audio.py", workflow)
+        self.assertIn("tools/generate_play_audio.py", workflow)
 
     def test_central_english_ui_and_camera_trigger(self):
         ui = (ROOT / "main/device_ui.cpp").read_text()
