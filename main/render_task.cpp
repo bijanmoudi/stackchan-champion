@@ -3,6 +3,7 @@
 
 #include <config_service/task_stack.hpp>
 #include "render_task.hpp"
+#include <config_service/ui_english.hpp>
 
 #include <cstdio>
 #include <string>
@@ -106,17 +107,17 @@ void draw_conv_status(RichCanvas& canvas, ConvStatus st, int canvas_w, int right
     const std::uint16_t err = canvas.color565(230, 110, 110);
     switch (st) {
     case ConvStatus::Disabled: return;
-    case ConvStatus::WaitingWifi: text = "Wi-Fi待ち"; dot = busy; break;
-    case ConvStatus::Connecting: text = "接続中"; dot = busy; break;
-    case ConvStatus::Listening: text = "待受中"; dot = ok; break;
-    case ConvStatus::UserSpeaking: text = "聞き取り中"; dot = live; break;
-    case ConvStatus::Thinking: text = "応答待ち"; dot = busy; break;
-    case ConvStatus::ToolRunning: text = "ツール実行中"; dot = busy; break;
-    case ConvStatus::AgentWaiting: text = "エージェント待ち"; dot = busy; break;
-    case ConvStatus::Talking: text = "応答中"; dot = live; break;
-    case ConvStatus::Yielded: text = "音声再生中"; dot = canvas.color565(150, 150, 150); break;
-    case ConvStatus::Reconnecting: text = "再接続中"; dot = busy; break;
-    case ConvStatus::Error: text = "接続エラー"; dot = err; break;
+    case ConvStatus::WaitingWifi: text = stackchan::ui_text::get("common.wait_wifi"); dot = busy; break;
+    case ConvStatus::Connecting: text = stackchan::ui_text::get("common.connecting"); dot = busy; break;
+    case ConvStatus::Listening: text = stackchan::ui_text::get("common.listening"); dot = ok; break;
+    case ConvStatus::UserSpeaking: text = stackchan::ui_text::get("common.hearing"); dot = live; break;
+    case ConvStatus::Thinking: text = stackchan::ui_text::get("common.thinking"); dot = busy; break;
+    case ConvStatus::ToolRunning: text = stackchan::ui_text::get("common.tool"); dot = busy; break;
+    case ConvStatus::AgentWaiting: text = stackchan::ui_text::get("common.agent"); dot = busy; break;
+    case ConvStatus::Talking: text = stackchan::ui_text::get("common.responding"); dot = live; break;
+    case ConvStatus::Yielded: text = stackchan::ui_text::get("common.playback"); dot = canvas.color565(150, 150, 150); break;
+    case ConvStatus::Reconnecting: text = stackchan::ui_text::get("common.reconnecting"); dot = busy; break;
+    case ConvStatus::Error: text = stackchan::ui_text::get("common.error"); dot = err; break;
     }
     if (text == nullptr) return;
 
