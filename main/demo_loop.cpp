@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 #include <M5Unified.h>
 #include <esp_log.h>
@@ -25,6 +26,7 @@
 #include "battery.hpp"
 #include "device_ui.hpp"
 #include "lt_timer.hpp"
+#include "play_audio_assets.hpp"
 #include "screens.hpp"
 #include "settings_sinks.hpp"
 #include "speech.hpp"
@@ -188,6 +190,39 @@ constexpr const char* kTag = "stackchan";
     constexpr float kShakeThresholdG = 1.6f;       // |a| ≥ 1.6 g (≈ 0.6 g jerk)
     constexpr std::uint32_t kShakeCooldownMs = 800;
     std::uint32_t next_shake_ms = 0;
+
+    // Offline game control. The generated 8 kHz G.711 mu-law assets are
+    // decoded once per utterance into 16 kHz mono PCM for the local speaker.
+    // This buffer stays alive until the asynchronous playRaw completes.
+    std::vector<std::int16_t> play_pcm;
+    std::uint32_t seen_play_sound_seq = 0;
+    int play_pending_sound = -1;
+    std::uint32_t play_speak_due_ms = 0;
+    std::uint32_t next_peek_step_ms = 0;
+    std::uint8_t previous_play_screen = 0;
+    bool was_playing_game = false;
+    auto ulaw_decode = [](std::uint8_t encoded) -> std::int16_t {
+        const std::uint8_t u = static_cast<std::uint8_t>(~encoded);
+        const int exponent = (u >> 4) & 7;
+        const int mantissa = u & 15;
+        int value = ((mantissa << 3) + 132) << exponent;
+        value -= 132;
+        return static_cast<std::int16_t>((u & 0x80) ? -value : value);
+    };
+    auto play_local_clip = [&](int clip_id) {
+        if (clip_id < 0 || clip_id >= static_cast<int>(sizeof(play_audio::kClips) /
+                                                       sizeof(play_audio::kClips[0]))) return;
+        const auto& clip = play_audio::kClips[clip_id];
+        play_pcm.resize(clip.size * 2);
+        for (std::size_t i = 0; i < clip.size; ++i) {
+            const std::int16_t pcm = ulaw_decode(clip.data[i]);
+            play_pcm[2*i] = pcm;
+            play_pcm[2*i+1] = pcm;
+        }
+        ESP_LOGI("play-audio", "local Persian clip %d: %u samples at 16 kHz",
+                 clip_id, static_cast<unsigned>(play_pcm.size()));
+        M5.Speaker.playRaw(play_pcm.data(), play_pcm.size(), 16000, false);
+    };
 
     for (;;) {
         // Camera session in progress: every In_I2C touch (M5.update's
@@ -371,6 +406,102 @@ constexpr const char* kTag = "stackchan";
                     g_state->face.gaze_target_v.store(0.0f, std::memory_order_relaxed);
                 }
             }
+        }
+
+        // Offline PLAY owns avatar, servos and speaker. Keep this check
+        // ahead of ordinary idle behavior and stop JTTS babble immediately.
+        // Unlike Gemini Live, audio assets are packaged into flash and never
+        // create an API request.
+        const bool playing_game = g_state->play_mode_active.load(std::memory_order_acquire);
+        if (playing_game) {
+            if (!was_playing_game) {
+                was_playing_game = true;
+                previous_play_screen = 0;
+                seen_play_sound_seq = g_state->play.sound_sequence.load(std::memory_order_acquire);
+                play_pending_sound = -1;
+                if (speech.is_speaking()) speech.stop();
+                g_state->face.mouth_open.store(0.0f, std::memory_order_relaxed);
+                ESP_LOGI("play", "offline play entered");
+            }
+
+            const std::uint8_t screen = g_state->play.screen.load(std::memory_order_acquire);
+            if (screen != previous_play_screen) {
+                previous_play_screen = screen;
+                next_peek_step_ms = now_ms + 1400;
+                g_state->play.peek_visible.store(false, std::memory_order_relaxed);
+                g_state->play.peek_touch_requested.store(false, std::memory_order_relaxed);
+                g_state->play.delayed_sound_at.store(0, std::memory_order_relaxed);
+                if (screen == 2) {
+                    g_state->servo.target_pitch_deg.store(
+                        std::clamp(10.0f, kPitchMinDeg, kPitchMaxDeg), std::memory_order_relaxed);
+                    ESP_LOGI("play", "peekaboo started: hide eyes, tilt head");
+                }
+            }
+
+            if (screen == 2) {
+                const bool early_touch =
+                    g_state->play.peek_touch_requested.exchange(false, std::memory_order_acq_rel);
+                if (early_touch || now_ms >= next_peek_step_ms) {
+                    const bool revealed =
+                        !g_state->play.peek_visible.load(std::memory_order_relaxed);
+                    g_state->play.peek_visible.store(revealed, std::memory_order_release);
+                    g_state->servo.target_pitch_deg.store(
+                        std::clamp(revealed ? 0.0f : 10.0f, kPitchMinDeg, kPitchMaxDeg),
+                        std::memory_order_relaxed);
+                    g_state->servo.target_yaw_deg.store(
+                        std::clamp(0.0f, kYawMinDeg, kYawMaxDeg), std::memory_order_relaxed);
+                    if (revealed) {
+                        play_pending_sound = 0; // "دالی"
+                        play_speak_due_ms = now_ms + 450; // head motion before sound
+                        next_peek_step_ms = now_ms + 2800;
+                    } else {
+                        next_peek_step_ms = now_ms + 1500;
+                    }
+                }
+            }
+
+            const std::uint32_t seq =
+                g_state->play.sound_sequence.load(std::memory_order_acquire);
+            if (seq != seen_play_sound_seq) {
+                seen_play_sound_seq = seq;
+                play_pending_sound = g_state->play.sound_id.load(std::memory_order_relaxed);
+                play_speak_due_ms = now_ms;
+            }
+            const std::uint32_t delayed_at =
+                g_state->play.delayed_sound_at.load(std::memory_order_acquire);
+            if (delayed_at && static_cast<std::int32_t>(now_ms - delayed_at) >= 0) {
+                g_state->play.delayed_sound_at.store(0, std::memory_order_release);
+                play_pending_sound = g_state->play.delayed_sound_id.load(std::memory_order_relaxed);
+                play_speak_due_ms = now_ms;
+            }
+
+            // Conversation must relinquish I2S before local audio plays.
+            // WaitingWifi/Error/Disabled have never acquired the mic.
+            const ConvStatus cs = g_state->conv.status.load(std::memory_order_relaxed);
+            const bool cloud_released = !conversation_enabled ||
+                g_state->conv.yielded_i2s.load(std::memory_order_acquire) ||
+                cs == ConvStatus::Disabled || cs == ConvStatus::WaitingWifi ||
+                cs == ConvStatus::Error;
+            const bool mic_released =
+                !g_state->mic_lip_task_running.load(std::memory_order_acquire) ||
+                g_state->mic_lip_yielded.load(std::memory_order_acquire);
+            if (play_pending_sound >= 0 && cloud_released && mic_released &&
+                !M5.Speaker.isPlaying() &&
+                static_cast<std::int32_t>(now_ms - play_speak_due_ms) >= 0) {
+                play_local_clip(play_pending_sound);
+                play_pending_sound = -1;
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(40));
+            continue;
+        }
+        if (was_playing_game) {
+            was_playing_game = false;
+            g_state->servo.target_pitch_deg.store(
+                std::clamp(0.0f, kPitchMinDeg, kPitchMaxDeg), std::memory_order_relaxed);
+            previous_play_screen = 0;
+            play_pending_sound = -1;
+            ESP_LOGI("play", "offline play exited");
         }
 
         const bool conv_active = g_state->conv.active.load(std::memory_order_relaxed);
