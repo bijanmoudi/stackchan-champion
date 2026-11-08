@@ -16,6 +16,10 @@
 
 #if CONFIG_STACKCHAN_CAMERA_ENABLED
 #include "board/camera_gc0308.hpp"
+#if CONFIG_STACKCHAN_FACE_DETECT_ENABLED
+#include <esp_heap_caps.h>
+#include <human_face_detect.hpp>
+#endif
 #endif
 
 namespace stackchan::app::camera_service {
@@ -274,12 +278,74 @@ MotionState sample_play_motion()
 }
 
 
+
+FaceResult sample_play_face()
+{
+#if CONFIG_STACKCHAN_FACE_DETECT_ENABLED
+    if (!g_camera.initialised() || g_state == nullptr) return {};
+    // Keep the model resident in PSRAM between scans. Current UI, Gemini and
+    // camera already consume memory, so refuse to start if headroom is low.
+    // This is still an experimental guard, not a full hardware guarantee.
+    static HumanFaceDetect* detector = nullptr;
+    if (!detector) {
+        const std::size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        const std::size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        ESP_LOGI("play-face", "before ESP-DL init: PSRAM=%u internal=%u",
+                 static_cast<unsigned>(free_psram), static_cast<unsigned>(free_internal));
+        if (free_psram < 1900000 || free_internal < 45000) {
+            ESP_LOGW("play-face", "not enough RAM headroom for face detection");
+            return {};
+        }
+        detector = new HumanFaceDetect(HumanFaceDetect::MSRMNP_S8_V1);
+    }
+
+    FaceResult best;
+    best.state = FaceState::NotFound;
+    {
+        QuiesceGuard quiet;
+        (void)g_camera.capture();
+        (void)g_camera.capture();
+        auto frame = g_camera.capture();
+        if (!frame || frame->width() < 100 || frame->height() < 100 ||
+            frame->size() < frame->width() * frame->height() * 2u)
+            return {};
+        // GC0308 driver supplies big-endian RGB565. ESP-DL supports that
+        // format directly: no extra 640x480 RGB888 framebuffer allocation.
+        dl::image::img_t image = {
+            .data = const_cast<std::uint8_t*>(frame->data()),
+            .width = static_cast<std::uint16_t>(frame->width()),
+            .height = static_cast<std::uint16_t>(frame->height()),
+            .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565BE
+        };
+        const auto& boxes = detector->run(image);
+        for (const auto& b : boxes) {
+            if (b.score <= best.confidence || b.box.size() < 4) continue;
+            best.state = FaceState::Found;
+            best.confidence = b.score;
+            best.center_x = (b.box[0] + b.box[2]) * 0.5f / frame->width();
+            best.center_y = (b.box[1] + b.box[3]) * 0.5f / frame->height();
+            best.width = (b.box[2] - b.box[0]) * 1.0f / frame->width();
+            best.height = (b.box[3] - b.box[1]) * 1.0f / frame->height();
+        }
+    }
+    if (best.state == FaceState::Found)
+        ESP_LOGI("play-face", "face %.2f at (%.2f,%.2f), size %.2fx%.2f",
+                 best.confidence, best.center_x, best.center_y,
+                 best.width, best.height);
+    return best;
+#else
+    return {};
+#endif
+}
+
+
 #else // !CONFIG_STACKCHAN_CAMERA_ENABLED
 
 void init_resident(stackchan::board::Board& /*board*/) {}
 void register_sinks(SharedState& /*state*/) {}
 void reset_play_motion() {}
 MotionState sample_play_motion() { return MotionState::Unavailable; }
+FaceResult sample_play_face() { return {}; }
 
 #endif // CONFIG_STACKCHAN_CAMERA_ENABLED
 

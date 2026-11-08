@@ -215,7 +215,9 @@ public:
         std::atomic<int> delayed_sound_id{-1};
         std::atomic<std::uint32_t> delayed_sound_at{0};
         std::atomic<bool> peek_touch_requested{false};
-        std::atomic<int> camera_mode{-1}; // -1 waiting; 0 unavailable; 1 motion sampling
+        std::atomic<int> camera_mode{-1}; // -1 waiting; 0 unavailable; 2 face detector
+        std::atomic<bool> face_ready{false};
+        std::atomic<bool> face_occluded{false};
         std::atomic<std::uint32_t> dali_until_ms{0};
     } play;
     // I2S ownership handshake: no local speech until the standalone

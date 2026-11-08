@@ -15,6 +15,15 @@ menu "Stack-chan QR scanner (Phase 1+2 test)"
             "Konnichiha ESP") and log internal-RAM headroom. cores3 with
             camera disabled. Requires a "model" partition.
 
+    config STACKCHAN_FACE_DETECT_ENABLED
+        bool "Experimental local face detection for Peekaboo"
+        depends on STACKCHAN_CAMERA_ENABLED && IDF_TARGET_ESP32S3
+        default n
+        help
+            ESP-DL MSR/MNP face presence and bounding boxes for local
+            Peekaboo; NOT identity recognition, not eye-cover recognition.
+            May exceed OTA flash/PSRAM budget. Experimental only.
+
     config STACKCHAN_QR_TEST_AT_BOOT
         bool "Auto-start QR scan ~30 s after boot"
         default n

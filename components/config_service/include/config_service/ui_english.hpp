@@ -92,6 +92,8 @@ inline const char* get(const char* key) {
         {"play.listen", "PICK A COLOR"},
         {"play.listening", "LISTEN..."},
         {"play.move", "MOVE TO PLAY"},
+        {"play.search_face", "LOOKING FOR YOU"},
+        {"play.cover_eyes", "COVER YOUR EYES"},
         {"play.tap_to_play", "TAP TO PLAY"},
         {"play.dali", "PEEKABOO!"},
         {"play.hide", "WHERE AM I?"},

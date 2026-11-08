@@ -11,6 +11,7 @@ set(_main_priv_reqs
     telegram
     espressif__esp_audio_codec
     espressif__esp-sr
+    espressif__human_face_detect
     json
     M5Unified
     m5gfx

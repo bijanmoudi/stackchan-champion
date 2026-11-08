@@ -830,9 +830,11 @@ void draw_play()
         const bool celebrating = static_cast<std::int32_t>(
             g_state->play.dali_until_ms.load(std::memory_order_acquire) - now_ms()) > 0;
         const int camera_mode = g_state->play.camera_mode.load(std::memory_order_acquire);
+        const bool acquired = g_state->play.face_ready.load(std::memory_order_acquire);
         const char* label = celebrating ? stackchan::ui_text::get("play.dali") :
                             camera_mode == 0 ? stackchan::ui_text::get("play.tap_to_play") :
-                                               stackchan::ui_text::get("play.move");
+                            !acquired ? stackchan::ui_text::get("play.search_face") :
+                                        stackchan::ui_text::get("play.cover_eyes");
         g_cv->drawString(label, kW / 2, 210);
     } else {
         // Cartoon hands covering the eyes (visual only, no physical arms).

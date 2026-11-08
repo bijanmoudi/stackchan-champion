@@ -26,6 +26,7 @@
 #include "avatar/expression.hpp"
 #include "battery.hpp"
 #include "camera_service.hpp"
+#include "play_dialogue.hpp"
 #include "device_ui.hpp"
 #include "lt_timer.hpp"
 #include "play_audio_assets.hpp"
@@ -206,6 +207,11 @@ constexpr const char* kTag = "stackchan";
     std::uint32_t next_peek_step_ms = 0;
     std::uint32_t next_camera_sample_ms = 0;
     std::uint32_t last_peek_event_ms = 0;
+    int face_seen_streak = 0, face_missing_streak = 0;
+    bool face_acquired = false, face_occluded = false;
+    std::uint32_t face_occluded_since_ms = 0;
+    std::uint32_t next_face_search_move_ms = 0;
+    int face_search_step = 0;
     std::uint8_t previous_play_screen = 0;
     bool was_playing_game = false;
     auto ulaw_decode = [](std::uint8_t encoded) -> std::int16_t {
@@ -458,6 +464,13 @@ constexpr const char* kTag = "stackchan";
                 next_camera_sample_ms = now_ms + 600;
                 last_peek_event_ms = now_ms;
                 camera_service::reset_play_motion();
+                face_seen_streak = face_missing_streak = 0;
+                face_acquired = face_occluded = false;
+                face_occluded_since_ms = 0;
+                next_face_search_move_ms = now_ms + 1500;
+                face_search_step = 0;
+                g_state->play.face_ready.store(false, std::memory_order_relaxed);
+                g_state->play.face_occluded.store(false, std::memory_order_relaxed);
                 g_state->play.peek_visible.store(true, std::memory_order_relaxed);
                 g_state->play.camera_mode.store(-1, std::memory_order_release);
                 g_state->play.peek_touch_requested.store(false, std::memory_order_relaxed);
@@ -470,50 +483,109 @@ constexpr const char* kTag = "stackchan";
             }
 
             if (screen == 2) {
-                bool event = g_state->play.peek_touch_requested.exchange(
+                // ESP-DL facial bounding boxes, NOT arbitrary scene motion,
+                // drive the game. The tiny model does not identify the child
+                // or explicitly classify hands over the eyes; 2-frame loss
+                // followed by reappearance is a conservative proxy.
+                const bool tap = g_state->play.peek_touch_requested.exchange(
                     false, std::memory_order_acq_rel);
                 if (now_ms >= next_camera_sample_ms) {
-                    next_camera_sample_ms = now_ms + 1250; // low-rate, minimize I2C stalls
-                    const auto motion = camera_service::sample_play_motion();
-                    if (motion == camera_service::MotionState::Unavailable) {
+                    next_camera_sample_ms = now_ms + 1000;
+                    const auto face = camera_service::sample_play_face();
+                    if (face.state == camera_service::FaceState::Unavailable) {
                         g_state->play.camera_mode.store(0, std::memory_order_release);
                     } else {
-                        g_state->play.camera_mode.store(1, std::memory_order_release);
-                        if (motion == camera_service::MotionState::Changed)
-                            event = true;
+                        g_state->play.camera_mode.store(2, std::memory_order_release);
+                        if (face.state == camera_service::FaceState::Found) {
+                            ++face_seen_streak;
+                            face_missing_streak = 0;
+                            if (!face_acquired && face_seen_streak >= 2) {
+                                face_acquired = true;
+                                g_state->play.face_ready.store(true, std::memory_order_release);
+                                ESP_LOGI("play-face", "face acquired; starting Peekaboo");
+                            }
+                            if (face_acquired && face_occluded && face_seen_streak >= 2) {
+                                face_occluded = false;
+                                g_state->play.face_occluded.store(false, std::memory_order_release);
+                                g_state->play.peek_visible.store(true, std::memory_order_release);
+                                if (static_cast<std::int32_t>(
+                                    now_ms - face_occluded_since_ms) < 12000) {
+                                    play_pending_sound = play_dialogue::Dali;
+                                    play_speak_due_ms = now_ms + 300;
+                                    g_state->play.dali_until_ms.store(
+                                        now_ms + 2200, std::memory_order_release);
+                                }
+                                ESP_LOGI("play-face", "reappeared after face loss");
+                            }
+                            if (face_acquired) {
+                                // Small bounded, 2-degree tracking steps.
+                                // Servo direction depends on K151 mounting;
+                                // avoid wide blind sweeps around a child.
+                                float yaw = g_state->servo.target_yaw_deg.load(
+                                    std::memory_order_relaxed);
+                                float pitch = g_state->servo.target_pitch_deg.load(
+                                    std::memory_order_relaxed);
+                                if (face.center_x < 0.35f) yaw -= 2.0f;
+                                if (face.center_x > 0.65f) yaw += 2.0f;
+                                if (face.center_y < 0.35f) pitch -= 2.0f;
+                                if (face.center_y > 0.65f) pitch += 2.0f;
+                                g_state->servo.target_yaw_deg.store(
+                                    std::clamp(yaw, -14.0f, 14.0f), std::memory_order_relaxed);
+                                g_state->servo.target_pitch_deg.store(
+                                    std::clamp(pitch, -6.0f, 12.0f), std::memory_order_relaxed);
+                            }
+                        } else {
+                            face_seen_streak = 0;
+                            ++face_missing_streak;
+                            if (face_acquired && !face_occluded && face_missing_streak >= 2) {
+                                face_occluded = true;
+                                face_occluded_since_ms = now_ms;
+                                g_state->play.face_occluded.store(true,
+                                    std::memory_order_release);
+                                g_state->play.peek_visible.store(false,
+                                    std::memory_order_release);
+                                ESP_LOGI("play-face", "face vanished; hiding eyes");
+                            }
+                        }
+                        // Limited search in both axes while waiting for the
+                        // FIRST face; stops immediately after acquisition.
+                        if (!face_acquired &&
+                            static_cast<std::int32_t>(now_ms - next_face_search_move_ms) >= 0) {
+                            constexpr float scan_yaw[] = {0, -8, 0, 8, 0};
+                            constexpr float scan_pitch[] = {0, 3, 7, 3, -3};
+                            const int n = face_search_step++ % 5;
+                            g_state->servo.target_yaw_deg.store(
+                                std::clamp(scan_yaw[n], kYawMinDeg, kYawMaxDeg),
+                                std::memory_order_relaxed);
+                            g_state->servo.target_pitch_deg.store(
+                                std::clamp(scan_pitch[n], kPitchMinDeg, kPitchMaxDeg),
+                                std::memory_order_relaxed);
+                            next_face_search_move_ms = now_ms + 2300;
+                        }
                     }
                 }
-                // A scene change is not yet face recognition; debounce
-                // to prevent one child gesture from producing multiple calls.
-                if (event && static_cast<std::int32_t>(now_ms - last_peek_event_ms) >= 1600) {
-                    last_peek_event_ms = now_ms;
-                    const bool revealed = !g_state->play.peek_visible.load(
+                // When the camera is unavailable, allow deliberate taps as
+                // fallback, but NEVER classify random object motion as a face.
+                if (tap && g_state->play.camera_mode.load(
+                        std::memory_order_relaxed) == 0) {
+                    const bool visible = !g_state->play.peek_visible.load(
                         std::memory_order_relaxed);
-                    g_state->play.peek_visible.store(revealed, std::memory_order_release);
-                    g_state->servo.target_pitch_deg.store(
-                        std::clamp(revealed ? 0.0f : 10.0f, kPitchMinDeg, kPitchMaxDeg),
-                        std::memory_order_relaxed);
-                    g_state->servo.target_yaw_deg.store(
-                        std::clamp(0.0f, kYawMinDeg, kYawMaxDeg), std::memory_order_relaxed);
-                    if (revealed) {
-                        play_pending_sound = 0; // Persian "دالی"
-                        g_state->play.dali_until_ms.store(now_ms + 1800, std::memory_order_release);
-                        play_speak_due_ms = now_ms + 450;
+                    g_state->play.peek_visible.store(visible, std::memory_order_release);
+                    if (visible) {
+                        play_pending_sound = play_dialogue::Dali;
+                        play_speak_due_ms = now_ms + 150;
                     }
-                    ESP_LOGI("play", "peekaboo %s (motion/tap)",
-                             revealed ? "revealed" : "hidden");
                 }
             }
 
-            // The UI locks colour input until the *actual* last speech
-            // has completed (not until a fixed delay). This makes it
-            // possible to listen to the whole question before choosing.
+            // Unlock answers after real speaker playback completes.
             if (play_clip_started && !M5.Speaker.isPlaying() &&
                 static_cast<std::int32_t>(now_ms - play_clip_start_ms) > 120) {
                 play_clip_started = false;
                 g_state->play.audio_busy.store(false, std::memory_order_release);
                 ESP_LOGI("play-audio", "clip finished; quiz can accept input");
             }
+
             const std::uint32_t seq =
                 g_state->play.sound_sequence.load(std::memory_order_acquire);
             if (seq != seen_play_sound_seq) {
