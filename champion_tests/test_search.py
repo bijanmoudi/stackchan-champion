@@ -45,7 +45,7 @@ class GeminiSearchTests(unittest.TestCase):
         self.assertIn("play_audio_assets.hpp", loop)
         self.assertIn("play_local_clip(play_pending_sound)", loop)
         self.assertIn("play_pcm.data()", loop)
-        self.assertIn("std::clamp(revealed ? 0.0f : 10.0f", loop)
+        self.assertIn("face_occluded_since_ms", loop)
         self.assertIn("state->mic_lip_yielded.store(true", mic)
         self.assertIn("queue_play_audio(1 + i)", ui)
         self.assertIn("g_play_quiz = !g_play_quiz", ui)
@@ -61,9 +61,9 @@ class GeminiSearchTests(unittest.TestCase):
         self.assertIn("ui_text::get", ui)
         for key in ("tabs.info", "tabs.settings1", "play.dali", "play.listen"):
             self.assertIn(key, strings)
-        self.assertIn("sample_play_motion()", loop)
-        self.assertIn("MotionState::Changed", loop)
-        self.assertIn("if (event &&", loop)
+        self.assertIn("sample_play_face()", loop)
+        self.assertIn("FaceState::Found", loop)
+        self.assertIn("face_seen_streak >= 2", loop)
         self.assertIn("reset_play_motion()", camera)
 
     def test_v3_top_tab_sizing_and_voice_diagnostics(self):
@@ -119,6 +119,21 @@ class GeminiSearchTests(unittest.TestCase):
         self.assertIn("audio_busy{false}", state)
         self.assertIn("static_assert(initial(0) == 10", hdr)
         self.assertNotIn("seen_play_sound_seq = g_state->play.sound_sequence", loop.split("if (!was_playing_game) {", 1)[1].split("const std::uint8_t screen", 1)[0])
+
+    def test_face_spike_requires_actual_face_detection(self):
+        face = (ROOT / "main/camera_service.cpp").read_text()
+        loop = (ROOT / "main/demo_loop.cpp").read_text()
+        manifest = (ROOT / "main/idf_component.yml").read_text()
+        hdr = (ROOT / "main/camera_service.hpp").read_text()
+        self.assertIn("espressif/human_face_detect", manifest)
+        self.assertIn("HumanFaceDetect", face)
+        self.assertIn("DL_IMAGE_PIX_TYPE_RGB565BE", face)
+        self.assertIn("FaceState::Found", face)
+        self.assertIn("FaceState::NotFound", hdr)
+        self.assertIn("face_missing_streak >= 2", loop)
+        self.assertIn("face_seen_streak >= 2", loop)
+        self.assertNotIn("MotionState::Changed", loop)
+        self.assertIn("face_search_step", loop)
 
     def test_search_preserves_local_tools(self):
         s = (ROOT / "components/conversation/gemini_live_client.cpp").read_text()
