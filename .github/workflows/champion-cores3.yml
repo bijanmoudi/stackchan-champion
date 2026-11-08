@@ -10,6 +10,9 @@ on:
     paths:
       - 'main/conversation_task.cpp'
       - 'main/device_ui.cpp'
+      - 'main/demo_loop.cpp'
+      - 'main/mic_lip_sync_task.cpp'
+      - 'tools/generate_play_audio.py'
       - 'main/shared_state.hpp'
       - 'components/conversation/gemini_live_client.cpp'
       - '.github/workflows/champion-cores3.yml'
@@ -35,12 +38,18 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends nodejs
+          apt-get install -y --no-install-recommends nodejs espeak
           node --version
 
       - name: Check source invariants
         shell: bash
         run: python3 -m unittest discover -s champion_tests -v
+
+      - name: Generate embedded offline Persian audio
+        shell: bash
+        run: |
+          python3 tools/generate_play_audio.py --output main/play_audio_assets.hpp
+          test -s main/play_audio_assets.hpp
 
       - name: Patch vendor library
         shell: bash
