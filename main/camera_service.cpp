@@ -4,6 +4,9 @@
 #include "camera_service.hpp"
 
 #include <sdkconfig.h>
+#include <array>
+#include <cmath>
+#include <cstdint>
 
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -29,6 +32,11 @@ stackchan::board::CameraGc0308 g_camera;
 
 // SharedState reference for the quiesce flag; set by register_sinks.
 SharedState* g_state = nullptr;
+
+constexpr int kCols = 20;
+constexpr int kRows = 16;
+std::array<std::uint8_t, kCols * kRows> g_motion_previous{};
+bool g_motion_baseline_valid = false;
 
 // Quiesce the PSRAM-heavy tasks (render sprite traffic) and the In_I2C
 // pollers for the duration of a camera session. The sensor streams
@@ -205,10 +213,73 @@ void register_sinks(SharedState& state)
     stackchan::wifi_config::set_camera_reg_sink(&reg_sink);
 }
 
+void reset_play_motion()
+{
+    g_motion_baseline_valid = false;
+}
+
+// Lightweight camera image-difference signal for interactive play.
+// A changed frame means meaningful local movement or a scene change, not
+// necessarily a child's face hiding/reappearing. The official ESP-WHO
+// face detector would be required to make that distinction reliably.
+MotionState sample_play_motion()
+{
+    if (!g_camera.initialised() || g_state == nullptr) return MotionState::Unavailable;
+    std::array<std::uint8_t, kCols * kRows> current{};
+    {
+        QuiesceGuard quiet;
+        // Let stale camera frames drain while shared PSRAM traffic is paused.
+        (void)g_camera.capture();
+        (void)g_camera.capture();
+        auto frame = g_camera.capture();
+        if (!frame) return MotionState::Unavailable;
+        const std::size_t w = frame->width(), h = frame->height();
+        const std::uint8_t* pixels = frame->data();
+        if (w < 100 || h < 100 || frame->size() < w * h * 2u) return MotionState::Unavailable;
+        for (int row = 0; row < kRows; ++row) {
+            for (int col = 0; col < kCols; ++col) {
+                const std::size_t y = (static_cast<std::size_t>(row) + 1u) * h / (kRows + 1u);
+                const std::size_t x = (static_cast<std::size_t>(col) + 1u) * w / (kCols + 1u);
+                const std::size_t idx = (y * w + x) * 2u;
+                const unsigned rgb = (static_cast<unsigned>(pixels[idx]) << 8u) | pixels[idx + 1u];
+                const unsigned r = (rgb >> 11u) & 31u, g = (rgb >> 5u) & 63u, b = rgb & 31u;
+                // Rough luma, enough to spot movement without allocating a
+                // full second VGA framebuffer.
+                current[row * kCols + col] =
+                    static_cast<std::uint8_t>((r * 76u + g * 75u + b * 29u) / 32u);
+            }
+        }
+    }
+    if (!g_motion_baseline_valid) {
+        g_motion_previous = current;
+        g_motion_baseline_valid = true;
+        return MotionState::Baseline;
+    }
+    std::int32_t total_delta = 0;
+    for (std::size_t i = 0; i < current.size(); ++i)
+        total_delta += static_cast<int>(current[i]) - static_cast<int>(g_motion_previous[i]);
+    const int global_shift = total_delta / static_cast<int>(current.size());
+    int changed = 0;
+    for (std::size_t i = 0; i < current.size(); ++i) {
+        const int local_change =
+            static_cast<int>(current[i]) - static_cast<int>(g_motion_previous[i]) - global_shift;
+        if (std::abs(local_change) > 25) ++changed;
+    }
+    g_motion_previous = current;
+    // About 16% of 320 sampled pixels changed after compensating global
+    // lighting; isolated pixels or sensor noise should not trigger.
+    const bool moved = changed > 50;
+    if (moved) ESP_LOGI("play-camera", "local motion score %d/%d", changed, kCols * kRows);
+    return moved ? MotionState::Changed : MotionState::Still;
+}
+
+
 #else // !CONFIG_STACKCHAN_CAMERA_ENABLED
 
 void init_resident(stackchan::board::Board& /*board*/) {}
 void register_sinks(SharedState& /*state*/) {}
+void reset_play_motion() {}
+MotionState sample_play_motion() { return MotionState::Unavailable; }
 
 #endif // CONFIG_STACKCHAN_CAMERA_ENABLED
 

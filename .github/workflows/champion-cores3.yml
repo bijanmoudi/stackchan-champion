@@ -7,10 +7,16 @@ on:
       - main
       - feature/gemini-google-search
       - feature/offline-play-mvp
+      - feature/play-v2-camera-i18n
     paths:
       - 'main/conversation_task.cpp'
       - 'main/device_ui.cpp'
       - 'main/demo_loop.cpp'
+      - 'main/camera_service.cpp'
+      - 'main/render_task.cpp'
+      - 'main/ap_screen.cpp'
+      - 'components/config_service/config_service.cpp'
+      - 'components/config_service/include/config_service/ui_english.hpp'
       - 'main/mic_lip_sync_task.cpp'
       - 'tools/generate_play_audio.py'
       - 'main/shared_state.hpp'
@@ -18,6 +24,7 @@ on:
       - '.github/workflows/champion-cores3.yml'
       - 'champion_tests/**'
       - 'docs/CHAMPION.md'
+      - 'docs/PLAY_V2.md'
 
 permissions:
   contents: read
@@ -38,17 +45,29 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends nodejs espeak
+          apt-get install -y --no-install-recommends nodejs espeak python3-pip python3-venv curl
           node --version
 
       - name: Check source invariants
         shell: bash
         run: python3 -m unittest discover -s champion_tests -v
 
-      - name: Generate embedded offline Persian audio
+      - name: Generate natural Persian voice (Piper Mana)
         shell: bash
         run: |
-          python3 tools/generate_play_audio.py --output main/play_audio_assets.hpp
+          python3 -m venv /tmp/piper-python
+          /tmp/piper-python/bin/python -m pip install --no-cache-dir 'piper-tts==1.8.0'
+          mkdir -p /tmp/persian-voice
+          curl --retry 3 --location --fail --silent --show-error \
+            'https://huggingface.co/MahtaFetrat/Mana-Persian-Piper/resolve/main/fa_IR-mana-medium.onnx' \
+            -o /tmp/persian-voice/fa_IR-mana-medium.onnx
+          curl --retry 3 --location --fail --silent --show-error \
+            'https://huggingface.co/MahtaFetrat/Mana-Persian-Piper/resolve/main/fa_IR-mana-medium.onnx.json' \
+            -o /tmp/persian-voice/fa_IR-mana-medium.onnx.json
+          echo 'e390c0e74ba71fd97c49ba662ee0c6e1724b462ba2d4561698af4f564840f126  /tmp/persian-voice/fa_IR-mana-medium.onnx' | sha256sum -c -
+          /tmp/piper-python/bin/python tools/generate_play_audio.py --engine piper \
+            --model /tmp/persian-voice/fa_IR-mana-medium.onnx \
+            --output main/play_audio_assets.hpp
           test -s main/play_audio_assets.hpp
 
       - name: Patch vendor library

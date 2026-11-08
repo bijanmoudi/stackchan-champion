@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 #include "demo_loop.hpp"
+#include <config_service/ui_english.hpp>
 #include "utf8.hpp"
 
 #include <algorithm>
@@ -24,6 +25,7 @@
 
 #include "avatar/expression.hpp"
 #include "battery.hpp"
+#include "camera_service.hpp"
 #include "device_ui.hpp"
 #include "lt_timer.hpp"
 #include "play_audio_assets.hpp"
@@ -175,7 +177,7 @@ constexpr const char* kTag = "stackchan";
     static std::atomic<bool> balloon_in_flight{false};
 
     // Wi-Fi state edge detection: while disconnected we pin a persistent
-    // "Wi-Fi: 切断中" balloon and suppress babble; when it reconnects we
+    // stackchan::ui_text::get("balloon.wifi") balloon and suppress babble; when it reconnects we
     // clear the balloon so normal demo behaviour resumes.
     bool wifi_warning_active = false;
 
@@ -199,6 +201,8 @@ constexpr const char* kTag = "stackchan";
     int play_pending_sound = -1;
     std::uint32_t play_speak_due_ms = 0;
     std::uint32_t next_peek_step_ms = 0;
+    std::uint32_t next_camera_sample_ms = 0;
+    std::uint32_t last_peek_event_ms = 0;
     std::uint8_t previous_play_screen = 0;
     bool was_playing_game = false;
     auto ulaw_decode = [](std::uint8_t encoded) -> std::int16_t {
@@ -213,12 +217,11 @@ constexpr const char* kTag = "stackchan";
         if (clip_id < 0 || clip_id >= static_cast<int>(sizeof(play_audio::kClips) /
                                                        sizeof(play_audio::kClips[0]))) return;
         const auto& clip = play_audio::kClips[clip_id];
-        play_pcm.resize(clip.size * 2);
-        for (std::size_t i = 0; i < clip.size; ++i) {
-            const std::int16_t pcm = ulaw_decode(clip.data[i]);
-            play_pcm[2*i] = pcm;
-            play_pcm[2*i+1] = pcm;
-        }
+        // Assets are 16 kHz mu-law, not 8 kHz duplicated into 16 kHz.
+        // Higher source bandwidth improves intelligibility of Persian clips.
+        play_pcm.resize(clip.size);
+        for (std::size_t i = 0; i < clip.size; ++i)
+            play_pcm[i] = ulaw_decode(clip.data[i]);
         ESP_LOGI("play-audio", "local Persian clip %d: %u samples at 16 kHz",
                  clip_id, static_cast<unsigned>(play_pcm.size()));
         M5.Speaker.playRaw(play_pcm.data(), play_pcm.size(), 16000, false);
@@ -428,23 +431,43 @@ constexpr const char* kTag = "stackchan";
             const std::uint8_t screen = g_state->play.screen.load(std::memory_order_acquire);
             if (screen != previous_play_screen) {
                 previous_play_screen = screen;
-                next_peek_step_ms = now_ms + 1400;
-                g_state->play.peek_visible.store(false, std::memory_order_relaxed);
+                // No automatic voice loop. Only a camera motion event or
+                // voluntary screen tap advances the peekaboo state.
+                next_peek_step_ms = now_ms + 1500;
+                next_camera_sample_ms = now_ms + 600;
+                last_peek_event_ms = now_ms;
+                camera_service::reset_play_motion();
+                g_state->play.peek_visible.store(true, std::memory_order_relaxed);
+                g_state->play.camera_mode.store(-1, std::memory_order_release);
                 g_state->play.peek_touch_requested.store(false, std::memory_order_relaxed);
                 g_state->play.delayed_sound_at.store(0, std::memory_order_relaxed);
                 if (screen == 2) {
                     g_state->servo.target_pitch_deg.store(
-                        std::clamp(10.0f, kPitchMinDeg, kPitchMaxDeg), std::memory_order_relaxed);
-                    ESP_LOGI("play", "peekaboo started: hide eyes, tilt head");
+                        std::clamp(0.0f, kPitchMinDeg, kPitchMaxDeg), std::memory_order_relaxed);
+                    ESP_LOGI("play", "peekaboo ready: waiting for camera movement or tap");
                 }
             }
 
             if (screen == 2) {
-                const bool early_touch =
-                    g_state->play.peek_touch_requested.exchange(false, std::memory_order_acq_rel);
-                if (early_touch || now_ms >= next_peek_step_ms) {
-                    const bool revealed =
-                        !g_state->play.peek_visible.load(std::memory_order_relaxed);
+                bool event = g_state->play.peek_touch_requested.exchange(
+                    false, std::memory_order_acq_rel);
+                if (now_ms >= next_camera_sample_ms) {
+                    next_camera_sample_ms = now_ms + 1250; // low-rate, minimize I2C stalls
+                    const auto motion = camera_service::sample_play_motion();
+                    if (motion == camera_service::MotionState::Unavailable) {
+                        g_state->play.camera_mode.store(0, std::memory_order_release);
+                    } else {
+                        g_state->play.camera_mode.store(1, std::memory_order_release);
+                        if (motion == camera_service::MotionState::Changed)
+                            event = true;
+                    }
+                }
+                // A scene change is not yet face recognition; debounce
+                // to prevent one child gesture from producing multiple calls.
+                if (event && static_cast<std::int32_t>(now_ms - last_peek_event_ms) >= 1600) {
+                    last_peek_event_ms = now_ms;
+                    const bool revealed = !g_state->play.peek_visible.load(
+                        std::memory_order_relaxed);
                     g_state->play.peek_visible.store(revealed, std::memory_order_release);
                     g_state->servo.target_pitch_deg.store(
                         std::clamp(revealed ? 0.0f : 10.0f, kPitchMinDeg, kPitchMaxDeg),
@@ -452,12 +475,12 @@ constexpr const char* kTag = "stackchan";
                     g_state->servo.target_yaw_deg.store(
                         std::clamp(0.0f, kYawMinDeg, kYawMaxDeg), std::memory_order_relaxed);
                     if (revealed) {
-                        play_pending_sound = 0; // "دالی"
-                        play_speak_due_ms = now_ms + 450; // head motion before sound
-                        next_peek_step_ms = now_ms + 2800;
-                    } else {
-                        next_peek_step_ms = now_ms + 1500;
+                        play_pending_sound = 0; // Persian "دالی"
+                        g_state->play.dali_until_ms.store(now_ms + 1800, std::memory_order_release);
+                        play_speak_due_ms = now_ms + 450;
                     }
+                    ESP_LOGI("play", "peekaboo %s (motion/tap)",
+                             revealed ? "revealed" : "hidden");
                 }
             }
 
@@ -578,7 +601,7 @@ constexpr const char* kTag = "stackchan";
                 g_state->face.mouth_open.store(mouth.open, std::memory_order_relaxed);
                 g_state->face.mouth_form.store(mouth.form, std::memory_order_relaxed);
 
-                // The "Wi-Fi: 切断中" balloon and the babble suppression below only
+                // The stackchan::ui_text::get("balloon.wifi") balloon and the babble suppression below only
                 // make sense when the assistant actually needs the network — i.e.
                 // when the conversation backend (OpenAI / Gemini / XiaoZhi) is on.
                 // With conversation disabled the demo is fully self-contained
@@ -588,7 +611,7 @@ constexpr const char* kTag = "stackchan";
                 if (!wifi_ok && !wifi_warning_active) {
                     speech.stop();
                     // hold_ms = UINT32_MAX so the balloon stays put until we clear it.
-                    g_state->set_balloon_text("Wi-Fi: 切断中", /*hold_ms=*/UINT32_MAX);
+                    g_state->set_balloon_text(stackchan::ui_text::get("balloon.wifi"), /*hold_ms=*/UINT32_MAX);
                     balloon_in_flight.store(false, std::memory_order_release);
                     wifi_warning_active = true;
                 } else if (wifi_ok && wifi_warning_active) {
@@ -693,7 +716,7 @@ constexpr const char* kTag = "stackchan";
                             // subtitle sink; no phrase configured → short balloon only.
                             if (speech.speak_proximity(esp_random()).empty()) {
                                 balloon_in_flight.store(true, std::memory_order_release);
-                                g_state->set_balloon_text("なに？", /*hold_ms=*/1500, [] {
+                                g_state->set_balloon_text(stackchan::ui_text::get("balloon.what"), /*hold_ms=*/1500, [] {
                                     balloon_in_flight.store(false, std::memory_order_release);
                                 });
                             }
@@ -782,7 +805,7 @@ constexpr const char* kTag = "stackchan";
                 g_state->face.expression.store(static_cast<int>(avatar::Expression::Happy),
                                           std::memory_order_relaxed);
                 balloon_in_flight.store(true, std::memory_order_release);
-                g_state->set_balloon_text("なでなで♡", /*hold_ms=*/2200, [] {
+                g_state->set_balloon_text(stackchan::ui_text::get("balloon.pet"), /*hold_ms=*/2200, [] {
                     balloon_in_flight.store(false, std::memory_order_release);
                 });
 
