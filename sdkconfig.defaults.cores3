@@ -31,6 +31,11 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 # revisiting the race.
 # 2026-09-15: カメラは実質未使用のため無効化 (内部 RAM が約 20 KB 空く)。戻すときは y に。
 CONFIG_STACKCHAN_CAMERA_ENABLED=y
+# Experimental face detector (ESP-DL MSR+MNP, no identity enrollment).
+CONFIG_STACKCHAN_FACE_DETECT_ENABLED=y
+CONFIG_FLASH_HUMAN_FACE_DETECT_MSRMNP_S8_V1=y
+CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1=y
+CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=y
 # DMA path selection (ESP32-S3 knob in esp32-camera).
 #   y: EDMA writes each line straight into the PSRAM framebuffer.
 #   n: DMA lands in small internal-RAM bounce buffers; the cam task memcpys
