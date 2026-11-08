@@ -15,6 +15,9 @@ CLIPS = [
     ("YELLOW", "زرد"),
     ("BRAVO", "آفرین!"),
     ("TRY", "دوباره امتحان کن"),
+    ("FIND_RED", "قرمز رو پیدا کن"),
+    ("FIND_BLUE", "آبی رو پیدا کن"),
+    ("FIND_YELLOW", "زرد رو پیدا کن"),
 ]
 
 def ulaw_encode(sample):
