@@ -321,7 +321,8 @@ void mic_lip_sync_task_entry(void* arg)
     for (;;) {
         // Interactive games own the I2S speaker. Park the mic entirely so
         // the game can speak without being raced by this lip-sync loop.
-        if (state->play_mode_active.load(std::memory_order_acquire)) {
+        if (state->play_mode_active.load(std::memory_order_acquire) ||
+            state->play_audio_active.load(std::memory_order_acquire)) {
             if (mic_owned) {
                 M5.Mic.end();
                 vTaskDelay(kI2sSettle);
