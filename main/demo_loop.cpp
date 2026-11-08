@@ -214,12 +214,11 @@ constexpr const char* kTag = "stackchan";
         if (clip_id < 0 || clip_id >= static_cast<int>(sizeof(play_audio::kClips) /
                                                        sizeof(play_audio::kClips[0]))) return;
         const auto& clip = play_audio::kClips[clip_id];
-        play_pcm.resize(clip.size * 2);
-        for (std::size_t i = 0; i < clip.size; ++i) {
-            const std::int16_t pcm = ulaw_decode(clip.data[i]);
-            play_pcm[2*i] = pcm;
-            play_pcm[2*i+1] = pcm;
-        }
+        // Assets are 16 kHz mu-law, not 8 kHz duplicated into 16 kHz.
+        // Higher source bandwidth improves intelligibility of Persian clips.
+        play_pcm.resize(clip.size);
+        for (std::size_t i = 0; i < clip.size; ++i)
+            play_pcm[i] = ulaw_decode(clip.data[i]);
         ESP_LOGI("play-audio", "local Persian clip %d: %u samples at 16 kHz",
                  clip_id, static_cast<unsigned>(play_pcm.size()));
         M5.Speaker.playRaw(play_pcm.data(), play_pcm.size(), 16000, false);
