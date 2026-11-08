@@ -209,6 +209,9 @@ public:
         std::atomic<bool> peek_visible{false};
         std::atomic<int> sound_id{-1};       // 0 dali, 1 red, 2 blue, 3 yellow, 4 bravo, 5 try
         std::atomic<std::uint32_t> sound_sequence{0};
+        // Disable answering while the robot is talking; the audio task
+        // clears this once playback finishes, never on a fixed timer.
+        std::atomic<bool> audio_busy{false};
         std::atomic<int> delayed_sound_id{-1};
         std::atomic<std::uint32_t> delayed_sound_at{0};
         std::atomic<bool> peek_touch_requested{false};
